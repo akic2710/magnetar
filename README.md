@@ -5,6 +5,7 @@
 [![Build](https://img.shields.io/badge/build-104_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
+[![License](https://img.shields.io/badge/license-MIT-b9c7de?style=flat-square)](LICENSE)
 
 **Hold to pull, release to blast.** A one-button neon arena roguelite, built as a
 single self-contained HTML file for CrazyGames.
@@ -479,3 +480,15 @@ Still worth adding before launch:
 - **A non-ad way to earn Flux.** The requirements ask that rewards be
   obtainable without ads; Flux already is (every run pays out), so keep that
   true if a rewarded Flux bonus is ever added.
+
+---
+
+## License
+
+[MIT](LICENSE) — © 2026 Akic2. Take it, learn from it, build on it.
+
+Two things the licence does **not** cover, because copyright and trademark are
+separate: the name *Magnetar* and any branding around it. The code, the
+procedural art and the synthesised audio are all yours to reuse; if you ship
+something built on this, please give it its own name rather than publishing a
+second game called Magnetar.
