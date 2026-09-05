@@ -26,10 +26,21 @@ a shooter, a splitter, a brute and a lancer closing in across a neon arena](docs
 diagonal is a lancer's aim telegraph — its spike is the one projectile you cannot
 catch, which is what stops "hold forever" from being a free bullet shield.</sub>
 
+![A Guardian boss fight: the hexagonal Guardian at right with a part-drained health
+bar, its radial bullet burst spreading across the arena, and the player at lower left
+holding a full orbit and returning fire](docs/screenshot-boss.webp)
+
+<sub>A Guardian arrives every fifth wave. Its bursts are magnetic, so the bullet wall
+it throws at you is also the ammunition you kill it with.</sub>
+
 | Level up | Cores |
 |---|---|
 | [![Upgrade cards, one of each rarity tier: a steel-bordered common, a cyan rare, and a violet epic carrying an outer bloom](docs/screenshot-levelup.webp)](docs/screenshot-levelup.webp) | [![The core menu: six starting cores in a grid, one equipped, two owned, one affordable and two locked behind higher Flux costs](docs/screenshot-cores.webp)](docs/screenshot-cores.webp) |
 | One card per tier. Colour, label, icon and the epic's bloom all carry the rarity, and the LEVEL header tints violet when an epic is in the hand. | All four states at once: **equipped**, owned, affordable, and locked. Filled pips and Flux costs read at a glance. |
+
+| | |
+|---|---|
+| <img src="docs/screenshot-mobile.webp" width="230" alt="The game on a 375x667 phone screen in portrait: the 16:9 playfield letterboxed into a narrow strip with large black bars above and below"> | **Portrait on a phone.** The arena is a fixed 16:9 field scaled to fit, so a 375×667 portrait screen gets a 375×211 strip — **32% of the display**, with 228px of black above and below. Everything stays functional and correctly laid out, but it is small. Landscape is the intended orientation: the same phone turned sideways gives the playfield the full 667px width, roughly double the scale. |
 
 ```
 dist/index.html    <- the submission build (standalone, no dependencies)
