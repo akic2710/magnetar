@@ -17,6 +17,11 @@ a shooter, a splitter, a brute and a lancer closing in across a neon arena](docs
 outward as guided slugs. The dashed diagonal is a lancer's aim telegraph: its spike
 is the one projectile you cannot catch.</sub>
 
+| Level up | Cores |
+|---|---|
+| [![Upgrade cards, one of each rarity tier: a steel-bordered common, a cyan rare, and a violet epic carrying an outer bloom](docs/screenshot-levelup.webp)](docs/screenshot-levelup.webp) | [![The core menu: six starting cores in a grid, one equipped, two owned, one affordable and two locked behind higher Flux costs](docs/screenshot-cores.webp)](docs/screenshot-cores.webp) |
+| One card per tier. Colour, label, icon and the epic's bloom all carry the rarity, and the LEVEL header tints violet when an epic is in the hand. | All four states at once: **equipped**, owned, affordable, and locked. Filled pips and Flux costs read at a glance. |
+
 ```
 dist/index.html    <- the submission build (standalone, no dependencies)
 game-body.html     <- same game as an Artifact-shaped fragment
