@@ -9,13 +9,21 @@
 **Hold to pull, release to blast.** A one-button neon arena roguelite, built as a
 single self-contained HTML file for CrazyGames.
 
+![Animated gameplay: the player holds the magnet and drags scrap into a tightening
+orbit as enemies close in, then releases, firing every captured object outward as
+guided slugs that tear through the swarm and run the combo counter up](docs/gameplay.gif)
+
+<sub>The whole game in one motion. **Hold** — scrap spirals in and the orbit fills.
+**Release** — all of it fires outward at once, seeking whatever is nearest. Wave 12,
+2.4 seconds, no cuts.</sub>
+
 ![Magnetar gameplay: the player core at the centre of a dashed magnet field, ringed
 by nine captured objects including two caught enemy bolts, with drones, a spinner,
 a shooter, a splitter, a brute and a lancer closing in across a neon arena](docs/screenshot.webp)
 
-<sub>Wave 14. The yellow ring means the orbit is full — releasing now fires all nine
-outward as guided slugs. The dashed diagonal is a lancer's aim telegraph: its spike
-is the one projectile you cannot catch.</sub>
+<sub>All six enemy types at once. The yellow ring means the orbit is full. The dashed
+diagonal is a lancer's aim telegraph — its spike is the one projectile you cannot
+catch, which is what stops "hold forever" from being a free bullet shield.</sub>
 
 | Level up | Cores |
 |---|---|

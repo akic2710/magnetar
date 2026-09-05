@@ -2,3 +2,6 @@
 # dist/index.html IS tracked - it is the file uploaded to CrazyGames.
 dist/test.html
 dist/.check.js
+
+# Frame scratch for the README GIF, rebuilt on demand.
+.gifwork/
