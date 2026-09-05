@@ -21,7 +21,7 @@ node build.mjs && cd dist && zip -j ../submission/magnetar.zip index.html
 | Portrait cover | `covers/portrait_800x1200.png` | 800×1200 |
 | Square cover | `covers/square_800x800.png` | 800×800 |
 
-Build size is ~104 KB in one file — far inside the 50 MB initial-download cap
+Build size is ~110 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
 eligibility.
 
@@ -71,7 +71,7 @@ Runs last two to five minutes. Dying is part of it.
 
 ```
 Mouse — move to steer, hold the button to pull, release to blast
-Touch — drag to steer, lift your finger to blast
+Touch — drag to steer, lift your finger to blast (play in landscape)
 Keyboard — arrows, WASD or ZQSD to move, Space or Shift to pull
 
 M mute · P pause · 1 / 2 / 3 pick an upgrade · C cores · Enter restart
