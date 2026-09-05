@@ -5,3 +5,6 @@ dist/.check.js
 
 # Frame scratch for the README GIF, rebuilt on demand.
 .gifwork/
+
+# Cover contact sheet, regenerated on demand.
+covers/_preview.png

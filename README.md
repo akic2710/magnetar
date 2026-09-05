@@ -40,6 +40,10 @@ build.mjs          <- concatenates src -> both builds (+ dist/test.html for QA)
 
 Build with `node build.mjs`. There is no toolchain, no npm install, no assets.
 
+Ready to publish: **[SUBMISSION.md](SUBMISSION.md)** holds the upload zip, the
+three cover images at CrazyGames' required sizes, and every form field written
+out to paste.
+
 ---
 
 ## Why this game
