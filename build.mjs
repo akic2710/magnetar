@@ -28,6 +28,8 @@ const standalone = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="description" content="Magnetar - hold to pull, release to blast. A one-button neon arena roguelite.">
 <meta name="theme-color" content="#04050c">
+<meta name="author" content="Akic2">
+<meta name="copyright" content="Copyright (c) 2026 Akic2 - PolyForm Strict 1.0.0, source-available, not open source">
 ${body}
 </body>
 </html>
