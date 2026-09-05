@@ -1,0 +1,2859 @@
+<title>Magnetar</title>
+<style>
+  html,body{height:100%;margin:0;background:#04050c;overflow:hidden;}
+  body{
+    color:#eaf2ff;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;
+    touch-action:none;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+  /* The native cursor is only hidden once the player has actually moved the
+     mouse, at which point the game draws its own reticle. */
+  #stage{position:fixed;inset:0;width:100%;height:100%;display:block;background:#04050c;cursor:crosshair;}
+  #stage.reticle{cursor:none;}
+
+  /* Banner ad, shown only on the death screen. Kept clear of the game's
+     buttons so a mis-tap can never land on an ad. */
+  #mgn-banner-wrap{
+    position:fixed; display:none; z-index:5;
+    flex-direction:column; align-items:center; gap:4px;
+    touch-action:auto;
+  }
+  #mgn-banner-wrap.on{ display:flex; }
+  #mgn-banner-label{
+    font:700 9px/1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    letter-spacing:.18em; color:rgba(234,242,255,.38); user-select:none;
+  }
+  #mgn-banner{ overflow:hidden; background:transparent; }
+</style>
+<canvas id="stage"></canvas>
+<div id="mgn-banner-wrap" aria-hidden="true">
+  <div id="mgn-banner-label">ADVERTISEMENT</div>
+  <div id="mgn-banner"></div>
+</div>
+<script>
+(function(){
+'use strict';
+
+/* =========================================================================
+   MAGNETAR - hold to pull, release to blast.
+   Single-file HTML5 arena roguelite. No external assets or network calls.
+   ========================================================================= */
+
+var VW = 1280, VH = 720, TAU = Math.PI * 2;
+
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function ri(a,b){ return Math.floor(a+Math.random()*(b-a+1)); }
+function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+function len(x,y){ return Math.sqrt(x*x+y*y); }
+
+/* ----------------------------- persistence -----------------------------
+   store() reads and writes through whichever backend is available, in order
+   of preference:
+     1. the CrazyGames SDK data module - synced to the player's account and
+        across their devices (adopted at runtime once the SDK finishes init)
+     2. localStorage - per-device, the default before/without the SDK
+     3. an in-memory map - private mode, sandboxed iframes, blocked storage
+   Reads are served from a cache so per-frame HUD lookups cost nothing, and
+   every path is exception-safe: storage that throws degrades to memory
+   rather than breaking the run. */
+var SYNC_KEYS  = ['mgn.earned','mgn.owned','mgn.core','mgn.best','mgn.bestwave','mgn.played'];
+var LOCAL_ONLY = {'mgn.mute':1};   // a device preference, not account state
+var saveBackend = null;            // null = localStorage, else SDK data module
+var saveCache = {};
+
+function rawGet(k){
+  try{
+    if(saveBackend && !LOCAL_ONLY[k]) return saveBackend.getItem(k);
+    return localStorage.getItem(k);
+  }catch(e){ return null; }
+}
+function rawSet(k,v){
+  try{
+    if(saveBackend && !LOCAL_ONLY[k]){ saveBackend.setItem(k,v); return; }
+    localStorage.setItem(k,v);
+  }catch(e){}
+}
+function store(k,v){
+  if(v===undefined){
+    if(k in saveCache) return saveCache[k];   // cached misses are null, and `in` still finds them
+    var got = rawGet(k);
+    saveCache[k] = got;
+    return got;
+  }
+  v = String(v);
+  saveCache[k] = v;
+  rawSet(k,v);
+  return v;
+}
+
+/* ------------------------------- canvas -------------------------------- */
+var cv = document.getElementById('stage');
+var ctx = cv.getContext('2d', {alpha:false});
+var dpr = 1, scale = 1, offX = 0, offY = 0, cssW = 0, cssH = 0;
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  cssW = window.innerWidth||VW; cssH = window.innerHeight||VH;
+  cv.width  = Math.max(1,Math.round(cssW*dpr));
+  cv.height = Math.max(1,Math.round(cssH*dpr));
+  cv.style.width = cssW+'px'; cv.style.height = cssH+'px';
+  scale = Math.min(cssW/VW, cssH/VH);
+  offX = (cssW - VW*scale)/2;
+  offY = (cssH - VH*scale)/2;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize,150); });
+resize();
+
+/* ---------------------------- glow sprites ----------------------------- */
+var glowCache = {};
+function glow(color){
+  var g = glowCache[color];
+  if(g) return g;
+  var s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  var g2 = c.getContext('2d');
+  var grd = g2.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  grd.addColorStop(0.00, color);
+  grd.addColorStop(0.20, color);
+  grd.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g2.fillStyle = grd;
+  g2.fillRect(0,0,s,s);
+  glowCache[color] = c;
+  return c;
+}
+function blob(x,y,r,color,alpha){
+  ctx.globalAlpha = (alpha===undefined?1:alpha);
+  ctx.drawImage(glow(color), x-r, y-r, r*2, r*2);
+  ctx.globalAlpha = 1;
+}
+
+/* -------------------------------- audio -------------------------------- */
+var A = {
+  ctx:null, master:null, sfxBus:null, musBus:null, noise:null,
+  muted: store('mgn.mute')==='1',
+  hum:null, hum2:null, humGain:null, humFilt:null, ready:false,
+  musT:0, step:0, bar:0,
+
+  init:function(){
+    if(this.ctx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    try{ this.ctx = new AC(); }catch(e){ return; }
+    var c = this.ctx;
+    this.master = c.createGain(); this.master.gain.value = this.muted?0:0.5; this.master.connect(c.destination);
+    this.sfxBus = c.createGain(); this.sfxBus.gain.value = 0.85; this.sfxBus.connect(this.master);
+    this.musBus = c.createGain(); this.musBus.gain.value = 0.26; this.musBus.connect(this.master);
+    var n = Math.floor(c.sampleRate*1.2), buf = c.createBuffer(1,n,c.sampleRate), d = buf.getChannelData(0);
+    for(var i=0;i<n;i++) d[i] = Math.random()*2-1;
+    this.noise = buf;
+    this.humGain = c.createGain(); this.humGain.gain.value = 0; this.humGain.connect(this.sfxBus);
+    this.humFilt = c.createBiquadFilter(); this.humFilt.type='lowpass'; this.humFilt.frequency.value=520; this.humFilt.Q.value=6;
+    this.humFilt.connect(this.humGain);
+    this.hum = c.createOscillator(); this.hum.type='sawtooth'; this.hum.frequency.value=62; this.hum.connect(this.humFilt);
+    this.hum2 = c.createOscillator(); this.hum2.type='sine'; this.hum2.frequency.value=124; this.hum2.connect(this.humFilt);
+    try{ this.hum.start(); this.hum2.start(); }catch(e){}
+    this.ready = true;
+  },
+  resume:function(){ if(this.ctx && this.ctx.state==='suspended'){ try{ this.ctx.resume(); }catch(e){} } },
+  ducked:false,
+  setMute:function(m){
+    this.muted = m; store('mgn.mute', m?'1':'0');
+    this.applyGain();
+  },
+  /* CrazyGames requires the game to be silent for the duration of a video ad.
+     Ducking is separate from mute so restoring audio afterwards cannot
+     clobber what the player actually chose. */
+  duck:function(on){ this.ducked = !!on; this.applyGain(); },
+  applyGain:function(){
+    if(!this.master || !this.ctx) return;
+    this.master.gain.setTargetAtTime((this.muted||this.ducked)?0:0.5, this.ctx.currentTime, 0.03);
+  },
+  tone:function(f,dur,type,vol,f2,delay,bus){
+    if(!this.ctx||this.muted) return;
+    var c=this.ctx, t=c.currentTime+(delay||0);
+    var o=c.createOscillator(); o.type=type||'square';
+    o.frequency.setValueAtTime(f,t);
+    if(f2) o.frequency.exponentialRampToValueAtTime(Math.max(24,f2), t+dur);
+    var g=c.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(vol===undefined?0.25:vol, t+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(bus||this.sfxBus);
+    try{ o.start(t); o.stop(t+dur+0.03); }catch(e){}
+  },
+  hit:function(dur,vol,freq,q,delay){
+    if(!this.ctx||this.muted) return;
+    var c=this.ctx, t=c.currentTime+(delay||0);
+    var s=c.createBufferSource(); s.buffer=this.noise; s.loop=true;
+    var f=c.createBiquadFilter(); f.type='bandpass'; f.frequency.setValueAtTime(freq,t); f.Q.value=q||1.2;
+    f.frequency.exponentialRampToValueAtTime(Math.max(90,freq*0.28), t+dur);
+    var g=c.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    s.connect(f); f.connect(g); g.connect(this.sfxBus);
+    try{ s.start(t); s.stop(t+dur+0.03); }catch(e){}
+  },
+  setHum:function(v,pitch){
+    if(!this.ctx||!this.humGain) return;
+    var t=this.ctx.currentTime;
+    this.humGain.gain.setTargetAtTime(this.muted?0:v*0.15, t, 0.06);
+    this.humFilt.frequency.setTargetAtTime(360+pitch*900, t, 0.08);
+    this.hum.frequency.setTargetAtTime(58+pitch*26, t, 0.10);
+  },
+
+  sBlast:function(p){
+    this.hit(0.30+p*0.16, 0.30, 1500+p*900, 0.9);
+    this.tone(360+p*70, 0.26, 'sawtooth', 0.16, 70);
+    this.tone(120, 0.22, 'sine', 0.30, 44);
+  },
+  sPop:function(combo){
+    var f = 420 + Math.min(combo,14)*46;
+    this.tone(f, 0.10, 'square', 0.13, f*1.7);
+    this.hit(0.09, 0.15, 2600, 1.4);
+  },
+  sBig:function(){ this.hit(0.5,0.32,900,0.7); this.tone(150,0.5,'sawtooth',0.20,40); },
+  sCatch:function(){ this.tone(880,0.09,'triangle',0.15,1500); },
+  sPull:function(){ this.tone(1150,0.05,'sine',0.05,1800); },
+  sHurt:function(){ this.tone(180,0.42,'sawtooth',0.30,48); this.hit(0.36,0.28,700,0.5); },
+  sLevel:function(){ var n=[523,659,784,1046]; for(var i=0;i<4;i++) this.tone(n[i],0.30,'triangle',0.17,null,i*0.075); },
+  /* A distinct sting when an epic is in the hand - you should hear it before
+     you have finished reading the cards. */
+  sEpic:function(){
+    var n=[523,659,784,1046,1318];
+    for(var i=0;i<5;i++) this.tone(n[i],0.42,'triangle',0.17,null,i*0.07);
+    this.tone(196,0.80,'sawtooth',0.11,98,0.02);
+    this.tone(1568,0.60,'sine',0.09,null,0.30);
+  },
+  sWave:function(){ this.tone(392,0.16,'triangle',0.15); this.tone(587,0.30,'triangle',0.15,null,0.11); },
+  sBoss:function(){ this.tone(90,1.1,'sawtooth',0.25,40); this.hit(0.9,0.20,420,0.6); },
+  sUi:function(){ this.tone(700,0.06,'square',0.10,900); },
+  sDead:function(){ this.tone(300,1.3,'sawtooth',0.26,36); this.hit(1.0,0.22,600,0.5); },
+  sHeal:function(){ var n=[659,880,1174]; for(var i=0;i<3;i++) this.tone(n[i],0.24,'sine',0.16,null,i*0.06); },
+
+  ROOTS:[0,0,-4,3],
+  tick:function(){
+    if(!this.ctx || this.muted || this.ducked){ this.musT = 0; return; }
+    var spb=60/126, six=spb/4, c=this.ctx;
+    if(this.musT===0) this.musT = c.currentTime+0.12;
+    var guard=0;
+    while(this.musT < c.currentTime+0.18 && guard++<64){
+      this.stepAt(this.step, this.musT);
+      this.step++;
+      if(this.step>=16){ this.step=0; this.bar=(this.bar+1)%4; }
+      this.musT += six;
+    }
+  },
+  stepAt:function(s,t){
+    var c=this.ctx, root=110*Math.pow(2, this.ROOTS[this.bar]/12);
+    var inten = clamp((G.wave-1)/14, 0, 1);
+    if(s%4===0){
+      var o=c.createOscillator(); o.type='sine';
+      o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(44,t+0.14);
+      var g=c.createGain(); g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.20);
+      o.connect(g); g.connect(this.musBus); try{ o.start(t); o.stop(t+0.24); }catch(e){}
+    }
+    if(s%4===2){
+      var sh=c.createBufferSource(); sh.buffer=this.noise; sh.loop=true;
+      var f=c.createBiquadFilter(); f.type='highpass'; f.frequency.value=7200;
+      var gg=c.createGain(); gg.gain.setValueAtTime(0.09+0.06*inten,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+      sh.connect(f); f.connect(gg); gg.connect(this.musBus); try{ sh.start(t); sh.stop(t+0.07); }catch(e){}
+    }
+    var arp=[0,7,12,7,3,10,15,10];
+    if(s%2===0){
+      var f2 = root*Math.pow(2, arp[(s/2)%8]/12);
+      var o2=c.createOscillator(); o2.type='sawtooth'; o2.frequency.setValueAtTime(f2,t);
+      var lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(700+1900*inten,t); lp.Q.value=5;
+      var g2=c.createGain();
+      g2.gain.setValueAtTime(0.0001,t);
+      g2.gain.linearRampToValueAtTime(0.12,t+0.01);
+      g2.gain.exponentialRampToValueAtTime(0.0001,t+0.20);
+      o2.connect(lp); lp.connect(g2); g2.connect(this.musBus);
+      try{ o2.start(t); o2.stop(t+0.24); }catch(e){}
+    }
+    if(s===0){
+      var ob=c.createOscillator(); ob.type='triangle'; ob.frequency.setValueAtTime(root/2,t);
+      var gb=c.createGain(); gb.gain.setValueAtTime(0.0001,t);
+      gb.gain.linearRampToValueAtTime(0.20,t+0.02); gb.gain.exponentialRampToValueAtTime(0.0001,t+0.7);
+      ob.connect(gb); gb.connect(this.musBus); try{ ob.start(t); ob.stop(t+0.75); }catch(e){}
+    }
+  }
+};
+
+
+/* ------------------------------- palette ------------------------------- */
+var C = {
+  bg:'#04050c',
+  grid:'rgba(90,150,255,0.055)',
+  player:'#7cf3ff',
+  playerCore:'#ffffff',
+  field:'rgba(124,243,255,0.16)',
+  scrap:'#ffd76a',
+  bolt:'#ff5db1',
+  drone:'#ff6b5a',
+  spinner:'#ffa23e',
+  shooter:'#ff5db1',
+  splitter:'#b06bff',
+  brute:'#ff3d6e',
+  lancer:'#c9d6ff',
+  spike:'#ffffff',
+  boss:'#ff2f5e',
+  shot:'#9dfbff',
+  text:'#eaf2ff',
+  dim:'rgba(234,242,255,0.55)'
+};
+
+/* -------------------------------- input -------------------------------- */
+var IN = {
+  x:VW/2, y:VH/2, down:false, justDown:false, justUp:false, has:false,
+  keys:{}, kx:0, ky:0, kMag:false, anyKey:false, clickX:0, clickY:0, clicked:false
+};
+
+function toWorld(cx,cy){
+  return { x: clamp((cx-offX)/scale, -80, VW+80), y: clamp((cy-offY)/scale, -80, VH+80) };
+}
+function onDown(cx,cy){
+  var p = toWorld(cx,cy);
+  IN.x=p.x; IN.y=p.y; IN.has=true;
+  if(!IN.down){ IN.down=true; IN.justDown=true; }
+  IN.clickX=p.x; IN.clickY=p.y; IN.clicked=true;
+  boot();
+}
+function onMove(cx,cy){
+  var p=toWorld(cx,cy); IN.x=p.x; IN.y=p.y;
+  if(!IN.has && !IN.isTouch){ IN.has=true; cv.className='reticle'; }
+  IN.has=true;
+}
+function onUp(){ if(IN.down){ IN.down=false; IN.justUp=true; } }
+
+cv.addEventListener('mousedown', function(e){ e.preventDefault(); onDown(e.clientX,e.clientY); });
+window.addEventListener('mousemove', function(e){ onMove(e.clientX,e.clientY); });
+window.addEventListener('mouseup', function(e){ onUp(); });
+cv.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+cv.addEventListener('touchstart', function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0]; onDown(t.clientX,t.clientY);
+}, {passive:false});
+cv.addEventListener('touchmove', function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0]; onMove(t.clientX,t.clientY);
+}, {passive:false});
+cv.addEventListener('touchend', function(e){ e.preventDefault(); onUp(); }, {passive:false});
+cv.addEventListener('touchcancel', function(e){ e.preventDefault(); onUp(); }, {passive:false});
+
+/* Keyboard is a full alternative scheme. Blast is radial, so no aiming is
+   needed and arrows / WASD / ZQSD (AZERTY) all work. Escape and Ctrl+W are
+   never bound - CrazyGames reserves them. */
+var MOVE_KEYS = {
+  ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1],
+  KeyA:[-1,0], KeyD:[1,0], KeyW:[0,-1], KeyS:[0,1],
+  KeyQ:[-1,0], KeyZ:[0,-1]
+};
+window.addEventListener('keydown', function(e){
+  if(e.repeat) return;
+  IN.keys[e.code]=true; IN.anyKey=true;
+  if(e.code==='Space' || e.code==='ShiftLeft' || e.code==='ShiftRight'){ e.preventDefault(); IN.kMag=true; }
+  if(MOVE_KEYS[e.code]) e.preventDefault();
+  if(e.code==='KeyM'){ A.setMute(!A.muted); A.sUi(); }
+  if(e.code==='KeyP'){ togglePause(); }
+  if(e.code==='Digit1'||e.code==='Digit2'||e.code==='Digit3'){
+    if(G.mode==='levelup') chooseUpgrade(+e.code.slice(5)-1);
+  }
+  if(e.code==='Enter' && (G.mode==='over' || G.mode==='cores')) restart();
+  if(e.code==='KeyC' && G.mode==='over') openCores();
+  if(G.mode==='revive' && !G.adBusy){
+    if(e.code==='KeyY') takeRevive();
+    if(e.code==='KeyN') finishRun();
+  }
+  boot();
+});
+window.addEventListener('keyup', function(e){
+  IN.keys[e.code]=false;
+  if(e.code==='Space' || e.code==='ShiftLeft' || e.code==='ShiftRight'){
+    IN.kMag=false;
+    if(G.mode==='play'||G.mode==='intro') doBlast();
+  }
+});
+window.addEventListener('blur', function(){
+  IN.keys={}; IN.kMag=false; IN.down=false;
+  if(G.mode==='play') G.paused=true;
+});
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden){ if(G.mode==='play') G.paused=true; }
+});
+
+function keyVector(){
+  var vx=0, vy=0;
+  for(var k in MOVE_KEYS){ if(IN.keys[k]){ vx+=MOVE_KEYS[k][0]; vy+=MOVE_KEYS[k][1]; } }
+  var l=len(vx,vy);
+  if(l>0){ vx/=l; vy/=l; }
+  return [vx,vy,l>0];
+}
+
+/* ------------------------------- upgrades ------------------------------ */
+/* ------------------------------- rarity -------------------------------- */
+/* Three tiers. `w` is the draw weight for one upgrade of that tier, so the
+   pool composition matters less than the tier: commons come up constantly,
+   epics are the cards you build a run around. Rarity only means anything if
+   the rare things are actually stronger, so the epics below are the
+   behaviour-changing upgrades, not just bigger numbers. */
+var RARITY = [
+  { name:'COMMON', w:56, col:'#b9c7de', glow:0.12 },
+  { name:'RARE',   w:30, col:'#5ad2ff', glow:0.20 },
+  { name:'EPIC',   w:12, col:'#c88bff', glow:0.32 }
+];
+var COMMON = 0, RARE = 1, EPIC = 2;
+
+/* `sides` gives each upgrade a stable icon shape - previously the polygon came
+   from the card slot, so the same upgrade looked different every level. */
+var UPGRADES = [
+  {id:'range',  r:COMMON, sides:6, name:'MAGNET FIELD',    desc:'Pull radius +52',                 max:6, ap:function(){ P.magR+=52; }},
+  {id:'cap',    r:COMMON, sides:8, name:'ORBIT SLOTS',     desc:'Hold +2 more objects',            max:5, ap:function(){ P.cap+=2; }},
+  {id:'speed',  r:COMMON, sides:3, name:'THRUSTERS',       desc:'Move speed +15%',                 max:5, ap:function(){ P.spd*=1.15; }},
+  {id:'scav',   r:COMMON, sides:7, name:'SCAVENGER',       desc:'Faster pull, denser scrap field', max:4, ap:function(){ P.pullMul*=1.36; G.scrapCap+=12; }},
+  {id:'hull',   r:COMMON, sides:5, name:'REINFORCED HULL', desc:'+1 max life, heal 2',             max:3, ap:function(){ P.maxHp++; P.hp=Math.min(P.maxHp,P.hp+2); }},
+
+  {id:'over',   r:RARE,   sides:4, name:'OVERCHARGE',      desc:'Blast +22% speed, pierce +1',     max:3, ap:function(){ P.blastSpd*=1.22; P.pierce+=1; }},
+  {id:'spin',   r:RARE,   sides:8, name:'SPIN CYCLE',      desc:'Orbit spins faster and grinds',   max:4, ap:function(){ P.omega+=0.55; P.orbR+=5; P.orbDmg+=1; }},
+  {id:'heavy',  r:RARE,   sides:6, name:'HEAVY SLUGS',     desc:'Blasted objects +1 damage',       max:2, ap:function(){ P.dmg+=1; }},
+  {id:'siphon', r:RARE,   sides:5, name:'SIPHON',          desc:'Restores 1 life once per wave',   max:2, ap:function(){ P.siphon+=1; }},
+
+  {id:'repulse',r:EPIC,   sides:7, name:'REPULSE WAVE',    desc:'Every blast releases a shockwave',max:3, ap:function(){ P.repulse+=1; }},
+  {id:'static', r:EPIC,   sides:3, name:'STATIC CHARGE',   desc:'Orbit arcs lightning, harder each stack', max:3, ap:function(){ P.stat+=1; }},
+  {id:'ric',    r:EPIC,   sides:4, name:'RICOCHET',        desc:'Blasted objects bounce off walls twice',  max:2, ap:function(){ P.bounce+=2; }}
+];
+
+/* -------------------------------- cores -------------------------------- */
+/* Meta-progression. Every run pays out Flux; Flux unlocks starting cores.
+   Cores are not stat bumps - each one rewrites the opening build enough to
+   change how you play the first thirty seconds, which is what brings people
+   back for run two. Player hues stay in the cool range; enemies own the warm
+   half of the spectrum, so a core can never be mistaken for a threat. */
+var CORES = [
+  { id:'prospector', name:'PROSPECTOR', cost:0, col:'#7cf3ff', sides:3,
+    tag:'The standard core. Balanced, forgiving, nothing to unlearn.',
+    stats:['3 lives, 6 slots','Standard pull','Standard blast'],
+    ap:function(p){} },
+
+  { id:'warden', name:'WARDEN', cost:150, col:'#6effc0', sides:6,
+    tag:'Heavy shell, short reach. Wear your orbit into the swarm like a saw.',
+    stats:['4 lives, 4 slots','Orbit grinds x2','Slower, shorter reach'],
+    ap:function(p){ p.hp=4; p.maxHp=4; p.orbDmg=2; p.orbR+=8;
+                    p.cap=4; p.magR-=35; p.spd*=0.85; p.blastSpd*=0.85; } },
+
+  { id:'maw', name:'MAW', cost:450, col:'#5ab9ff', sides:8,
+    tag:'A hungry ring. Swallow half the field before you let go of it.',
+    stats:['11 orbit slots','Pull +25%','2 lives, slower'],
+    ap:function(p){ p.cap=11; p.pullMul=1.25; p.hp=2; p.maxHp=2;
+                    p.spd*=0.88; p.blastSpd*=0.90; } },
+
+  { id:'needle', name:'NEEDLE', cost:900, col:'#b6f0ff', sides:3,
+    tag:'Glass and spite. Four slugs that go straight through everything.',
+    stats:['2 lives, 5 slots','+1 damage, +2 pierce','Blast +25% speed'],
+    ap:function(p){ p.hp=2; p.maxHp=2; p.cap=5; p.dmg+=1; p.pierce+=2;
+                    p.blastSpd*=1.25; } },
+
+  { id:'pulsar', name:'PULSAR', cost:1500, col:'#eaf4ff', sides:5,
+    tag:'Built to detonate, not to collect. Every release is a shockwave.',
+    stats:['Repulse wave','Static charge','2 lives, 4 slots'],
+    ap:function(p){ p.repulse=1; p.stat=1; p.cap=4; p.hp=2; p.maxHp=2;
+                    p.magR-=45; p.spd*=0.94; } },
+
+  { id:'drifter', name:'DRIFTER', cost:1800, col:'#8affe0', sides:4,
+    tag:'No drag while pulling. You never have to stop moving again.',
+    stats:['Full speed while held','Move speed +25%','2 lives, 5 slots'],
+    ap:function(p){ p.holdMul=1.0; p.spd*=1.25; p.hp=2; p.maxHp=2; p.cap=5; } }
+];
+
+function coreById(id){
+  for(var i=0;i<CORES.length;i++) if(CORES[i].id===id) return CORES[i];
+  return CORES[0];
+}
+function num(v){ var n = parseInt(v||'0',10); return isNaN(n) ? 0 : n; }
+function spentFlux(){
+  var l = ownedList(), total = 0;
+  for(var i=0;i<CORES.length;i++) if(l.indexOf(CORES[i].id)>=0) total += CORES[i].cost;
+  return total;
+}
+/* Balance is derived, never stored, so it can never disagree with `owned`. */
+function getEarned(){ return num(store('mgn.earned')); }
+function getFlux(){ return Math.max(0, getEarned() - spentFlux()); }
+function addFlux(n){ store('mgn.earned', String(getEarned() + Math.max(0, Math.round(n)))); }
+
+/* Saves written before the earned/spent model stored a balance. */
+function migrateSave(){
+  if(store('mgn.earned') !== null) return;
+  var old = store('mgn.flux');
+  if(old === null) return;
+  store('mgn.earned', String(num(old) + spentFlux()));
+}
+
+/* Merge local and cloud saves without ever taking something away: unlocks
+   union, monotonic counters take the max, and the equipped core has to be one
+   the player actually owns afterwards. */
+function mergeSave(local, cloud){
+  var ids = {}, i, l;
+  l = (local['mgn.owned']||'prospector').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) ids[l[i]] = 1;
+  l = (cloud['mgn.owned']||'prospector').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) ids[l[i]] = 1;
+  var owned = [];
+  for(i=0;i<CORES.length;i++) if(ids[CORES[i].id]) owned.push(CORES[i].id);
+  if(owned.indexOf('prospector') < 0) owned.unshift('prospector');
+
+  var core = cloud['mgn.core'];
+  if(!core || owned.indexOf(core) < 0) core = local['mgn.core'];
+  if(!core || owned.indexOf(core) < 0) core = 'prospector';
+
+  return {
+    'mgn.owned':    owned.join(','),
+    'mgn.core':     core,
+    'mgn.earned':   String(Math.max(num(local['mgn.earned']),   num(cloud['mgn.earned']))),
+    'mgn.best':     String(Math.max(num(local['mgn.best']),     num(cloud['mgn.best']))),
+    'mgn.bestwave': String(Math.max(num(local['mgn.bestwave']), num(cloud['mgn.bestwave']))),
+    'mgn.played':   (local['mgn.played']==='1' || cloud['mgn.played']==='1') ? '1' : null
+  };
+}
+
+/* Switch store() onto the SDK data module, folding in whatever this device
+   already had. The SDK migrates its own guest data on sign-in, but guest
+   progress written straight to localStorage before the SDK loaded is invisible
+   to it - this is what keeps that from being lost. */
+function adoptCloudSave(dataModule){
+  var local = {}, cloud = {}, i, k;
+  for(i=0;i<SYNC_KEYS.length;i++){ k=SYNC_KEYS[i]; local[k] = store(k); }
+  saveBackend = dataModule;
+  saveCache = {};
+  for(i=0;i<SYNC_KEYS.length;i++){ k=SYNC_KEYS[i]; cloud[k] = store(k); }
+  var merged = mergeSave(local, cloud);
+  for(k in merged) if(merged[k] !== null) store(k, merged[k]);
+  return merged;
+}
+
+/* The account swaps underneath us on sign-in, so the cache has to go. */
+function refreshCloudSave(){ saveCache = {}; }
+function ownedList(){ return (store('mgn.owned')||'prospector').split(','); }
+function owns(id){ return id==='prospector' || ownedList().indexOf(id)>=0; }
+function selectedCore(){
+  var id = store('mgn.core') || 'prospector';
+  return owns(id) ? id : 'prospector';
+}
+function equipCore(id){ if(owns(id)) store('mgn.core', id); }
+function buyCore(id){
+  var c = coreById(id);
+  if(!c || owns(id)) return false;
+  if(getFlux() < c.cost) return false;
+  var l = ownedList();   // the spend is implied by ownership, never deducted
+  if(l.indexOf(id) < 0) l.push(id);
+  store('mgn.owned', l.join(','));
+  return true;
+}
+/* Depth is worth more than score, so a deep careful run beats farming wave 3.
+   The flat term keeps a short first run from feeling like it paid nothing. */
+function fluxFor(score, wave){ return 15 + Math.floor(score/150) + wave*4; }
+
+/* ------------------------------ game state ----------------------------- */
+var P = {};
+var G = {};
+
+function newPlayer(){
+  var p = {
+    x:VW/2, y:VH/2, vx:0, vy:0, r:13,
+    hp:3, maxHp:3, inv:0,
+    magR:175, cap:6, spd:400, blastSpd:940, pierce:1, dmg:1,
+    repulse:0, siphon:0, omega:2.5, orbR:46, orbDmg:1, bounce:0,
+    pullMul:1, stat:0, statT:0, orbBase:0, holdMul:0.60,
+    killsSinceHeal:0, charge:0, blastCool:0,
+    core:'prospector', sides:3
+  };
+  var core = coreById(selectedCore());
+  p.core = core.id;
+  p.sides = core.sides;
+  core.ap(p);
+  C.player = core.col;   // the whole player accent follows the equipped core
+  return p;
+}
+
+function newGame(){
+  return {
+    mode:'intro', paused:false, timeScale:1, hitStop:0, t:0, uiT:0,
+    wave:0, waveT:0, betweenT:0, spawnQ:[],
+    score:0, level:1, xp:0, xpNeed:9,
+    combo:0, comboT:0, bestCombo:0, kills:0,
+    shake:0, flash:0, pulse:0, chroma:0,
+    cards:[], scrapCap:44,
+    introStep:0, introT:0, introPulled:false, introBlasted:false,
+    bossRef:null, waveBanner:0, waveBannerTxt:'',
+    deathT:0, ended:false, dmgFlash:0,
+    postDeath:false, runFinished:false, revived:false, watchedAd:false, adAttempted:false,
+    reviveT:0, adBusy:false, adMsg:'', adMsgT:0
+  };
+}
+
+var scrap=[], enemies=[], bolts=[], shots=[], orbit=[], parts=[], pops=[], waves=[], zaps=[];
+
+function reset(){
+  P = newPlayer();
+  G = newGame();
+  scrap.length=0; enemies.length=0; bolts.length=0; shots.length=0;
+  orbit.length=0; parts.length=0; pops.length=0; waves.length=0; zaps.length=0;
+  for(var i=0;i<30;i++) addScrap(true);
+  if(store('mgn.played')==='1'){ G.mode='play'; startWave(1); }
+}
+
+/* ------------------------------- spawning ------------------------------ */
+function addScrap(anywhere){
+  var x,y,tries=0;
+  do{
+    x = rnd(40, VW-40); y = rnd(40, VH-40); tries++;
+  } while(tries<12 && len(x-P.x, y-P.y) < (anywhere?120:220));
+  scrap.push({ x:x, y:y, vx:rnd(-16,16), vy:rnd(-16,16), r:rnd(5,8), a:rnd(0,TAU), sp:rnd(-2,2), life:0 });
+}
+
+function edgePoint(){
+  var s = ri(0,3), m = 46;
+  if(s===0) return {x:rnd(m,VW-m), y:m};
+  if(s===1) return {x:VW-m, y:rnd(m,VH-m)};
+  if(s===2) return {x:rnd(m,VW-m), y:VH-m};
+  return {x:m, y:rnd(m,VH-m)};
+}
+
+/* Player tops out at 400 u/s (240 while holding the magnet), so enemy speeds
+   are set relative to that: early waves are comfortably outrunnable, late
+   waves close the gap and holding the magnet becomes a real commitment. */
+var ETYPE = {
+  drone:   {r:14, hp:1, spd:132, xp:1, sc:10,  col:C.drone},
+  spinner: {r:12, hp:1, spd:252, xp:1, sc:16,  col:C.spinner},
+  shooter: {r:17, hp:2, spd:112, xp:2, sc:28,  col:C.shooter},
+  splitter:{r:22, hp:3, spd:96,  xp:3, sc:44,  col:C.splitter},
+  brute:   {r:31, hp:9, spd:82,  xp:5, sc:80,  col:C.brute},
+  lancer:  {r:19, hp:4, spd:104, xp:3, sc:60,  col:C.lancer},
+  boss:    {r:58, hp:44, spd:52, xp:16,sc:400, col:C.boss}
+};
+
+function makeEnemy(type, x, y){
+  var d = ETYPE[type];
+  var wave = Math.max(1,G.wave);
+  var hp = d.hp;
+  if(type==='boss') hp = 30 + Math.floor(wave/5-1)*20;
+  else if(wave>8) hp += Math.floor((wave-8)/3);
+  return {
+    type:type, x:x, y:y, vx:0, vy:0, r:d.r,
+    hp:hp, maxHp:hp, spd:d.spd*(1+Math.min(0.80, wave*0.030)),
+    col:d.col, xp:d.xp, sc:d.sc,
+    t:rnd(0,10), fire:rnd(0.8,2.2), flash:0, dead:false, charge:0,
+    phase:0, phaseT:0, wob:rnd(0,TAU), spawnA:0.6
+  };
+}
+
+function spawnAt(type, pt){
+  var e = makeEnemy(type, pt.x, pt.y);
+  enemies.push(e);
+  waves.push({x:pt.x, y:pt.y, r:6, max:type==='boss'?110:46, life:0.6, col:e.col, w:3});
+  return e;
+}
+
+function startWave(n){
+  G.wave = n;
+  G.waveT = 0;
+  G.healedThisWave = false;
+  // Wave 30 is a deep run; report progress against that as "complete".
+  if(window.CG) window.CG.progress(Math.min(100, n/30*100));
+  G.spawnQ.length = 0;
+  var isBoss = (n % 5 === 0);
+  if(isBoss){
+    G.waveBannerTxt = 'WAVE ' + n + '  •  GUARDIAN';
+    G.spawnQ.push({t:'boss', at:0.35, pt:{x:VW/2, y:120}});
+    A.sBoss();
+  } else {
+    G.waveBannerTxt = 'WAVE ' + n;
+    // Gentle first waves (first impression decides bounce rate on a portal),
+    // saturating through the mid game, then steady linear growth so late
+    // waves keep escalating instead of plateauing.
+    var budget = Math.round(3 + 30*(1 - Math.exp(-n/10)) + Math.max(0, n-12)*2.0);
+
+    // Weighted pool: drones thin out as tougher types take over the budget,
+    // so wave 25 is not just fifty drones.
+    var pool = [{t:'drone', c:1, w:Math.max(1.2, 8 - n*0.32)}];
+    if(n>=2) pool.push({t:'spinner',  c:2, w:2.6});
+    if(n>=3) pool.push({t:'shooter',  c:3, w:1.8 + n*0.14});
+    if(n>=6) pool.push({t:'splitter', c:4, w:1.2 + n*0.12});
+    if(n>=8) pool.push({t:'brute',    c:7, w:0.9 + n*0.10});
+    if(n>=11) pool.push({t:'lancer',  c:5, w:1.4 + n*0.13});
+
+    var list=[], guard=0;
+    while(budget>0 && guard++<160){
+      var opts=[], total=0, i;
+      for(i=0;i<pool.length;i++) if(pool[i].c<=budget){ opts.push(pool[i]); total+=pool[i].w; }
+      if(!opts.length) break;
+      var roll = Math.random()*total, p = opts[opts.length-1];
+      for(i=0;i<opts.length;i++){ roll -= opts[i].w; if(roll<=0){ p = opts[i]; break; } }
+      budget -= p.c; list.push(p.t);
+    }
+    for(var j=0;j<list.length;j++) G.spawnQ.push({t:list[j], at:j*0.17, pt:edgePoint()});
+    A.sWave();
+  }
+  G.waveBanner = 2.0;
+}
+
+
+/* -------------------------------- effects ------------------------------ */
+function spark(x,y,n,col,spdA,spdB,lifeA,lifeB,size){
+  for(var i=0;i<n;i++){
+    var a=rnd(0,TAU), s=rnd(spdA,spdB);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rnd(lifeA,lifeB),max:0,r:size||3,col:col,drag:2.6});
+    parts[parts.length-1].max = parts[parts.length-1].life;
+  }
+}
+function popText(x,y,txt,col,size){
+  pops.push({x:x,y:y,txt:txt,col:col||C.text,life:0.9,max:0.9,size:size||22,vy:-42});
+}
+function ring(x,y,max,col,life,w){
+  waves.push({x:x,y:y,r:6,max:max,life:life||0.45,col:col,w:w||3});
+}
+function shakeIt(v){ G.shake = Math.min(34, G.shake+v); }
+
+/* --------------------------- orbit + magnet ---------------------------- */
+function orbitCount(){ return orbit.length; }
+
+function captureInto(kind, x, y, r){
+  if(orbit.length >= P.cap) return false;
+  orbit.push({kind:kind, ang:0, cur:len(x-P.x,y-P.y), r:r, x:x, y:y, spin:rnd(-4,4), t:0});
+  redistribute();
+  return true;
+}
+function redistribute(){
+  var n = orbit.length;
+  for(var i=0;i<n;i++) orbit[i].slot = i;
+}
+
+function doBlast(){
+  var n = orbit.length;
+  P.blastCool = 0.06;
+  if(n===0){
+    // tiny courtesy pulse so the verb always answers
+    ring(P.x,P.y,52,'rgba(124,243,255,0.5)',0.22,2);
+    A.tone(520,0.06,'sine',0.05,760);
+    return;
+  }
+  for(var i=0;i<n;i++){
+    var o = orbit[i];
+    var ang = P.orbBase + (o.slot||0)*TAU/n;
+    var sp = P.blastSpd * (o.kind==='bolt'?1.12:1);
+    shots.push({
+      x:P.x+Math.cos(ang)*P.orbR, y:P.y+Math.sin(ang)*P.orbR,
+      vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp,
+      r:o.kind==='bolt'?8:6,
+      dmg:(o.kind==='bolt'?3:1) + (P.dmg-1),
+      pierce:(o.kind==='bolt'?2:1) + (P.pierce-1),
+      bounce:P.bounce, kind:o.kind, life:2.6, a:rnd(0,TAU), hitIds:[]
+    });
+  }
+  orbit.length = 0;
+  var power = clamp(n/8, 0, 1.6);
+  A.sBlast(power);
+  shakeIt(3 + power*7);
+  G.pulse = Math.min(1, 0.35 + power*0.5);
+  ring(P.x, P.y, 90+power*70, 'rgba(157,251,255,0.55)', 0.34, 3);
+  spark(P.x,P.y, 6+Math.round(power*8), C.shot, 120, 420, 0.18, 0.4, 3);
+  if(P.repulse>0){
+    shots.push({shock:true, x:P.x, y:P.y, r:10, max:120+P.repulse*46, dmg:P.repulse, life:0.34, hitIds:[]});
+  }
+  if(G.mode==='intro' && n>=2) G.introBlasted = true;
+}
+
+/* ------------------------------- combat -------------------------------- */
+function damageEnemy(e, dmg, fx, fy){
+  if(e.dead) return;
+  e.hp -= dmg;
+  e.flash = 0.12;
+  if(e.type!=='brute' && e.type!=='boss'){
+    e.vx += (fx||0)*0.35; e.vy += (fy||0)*0.35;
+  }
+  if(e.hp<=0){ killEnemy(e); }
+  else {
+    spark(e.x,e.y,3,e.col,60,200,0.12,0.26,2.4);
+    A.sPop(0);
+  }
+}
+
+function killEnemy(e){
+  e.dead = true;
+  G.kills++;
+  G.combo++; G.comboT = 2.6;
+  if(G.combo > G.bestCombo) G.bestCombo = G.combo;
+  var mult = 1 + (G.combo-1)*0.12;
+  var pts = Math.round(e.sc * mult);
+  G.score += pts;
+  G.xp += e.xp;
+  if(G.combo>2) popText(e.x, e.y-8, '+'+pts, C.scrap, 20);
+
+  spark(e.x, e.y, e.type==='boss'?60:(10+Math.round(e.r*0.6)), e.col, 90, 340+e.r*6, 0.25, 0.7, 3.4);
+  ring(e.x, e.y, e.r*3.2, e.col, 0.36, 2.5);
+  A.sPop(G.combo);
+  G.hitStop = Math.max(G.hitStop, e.type==='boss'?0.22:0.035);
+  shakeIt(e.type==='boss'?26:(e.type==='brute'?9:3));
+
+  var drops = e.type==='boss'?14:(e.type==='brute'?5:(e.type==='splitter'?4:2));
+  for(var i=0;i<drops;i++){
+    var a=rnd(0,TAU), d=rnd(10,e.r+16);
+    scrap.push({x:e.x+Math.cos(a)*d, y:e.y+Math.sin(a)*d, vx:Math.cos(a)*rnd(40,150), vy:Math.sin(a)*rnd(40,150), r:rnd(5,8), a:rnd(0,TAU), sp:rnd(-3,3), life:0});
+  }
+  if(e.type==='splitter'){
+    for(var k=0;k<3;k++){
+      var an = k*TAU/3 + rnd(0,1);
+      var s = spawnAt('drone', {x:clamp(e.x+Math.cos(an)*36,30,VW-30), y:clamp(e.y+Math.sin(an)*36,30,VH-30)});
+      s.spawnA = 0.18;
+    }
+  }
+  if(e.type==='boss'){
+    G.bossRef=null; A.sBig(); G.flash=0.6; G.chroma=1;
+    if(window.CG) window.CG.happytime();
+    popText(e.x, e.y-30, 'GUARDIAN DOWN', C.scrap, 30);
+  }
+  P.killsSinceHeal++;
+  // Capped at one heal per wave: unbounded kill-based sustain made a
+  // fully-upgraded player literally unkillable in long runs.
+  if(P.siphon>0 && !G.healedThisWave && P.killsSinceHeal >= 30/P.siphon){
+    P.killsSinceHeal = 0; G.healedThisWave = true;
+    if(P.hp < P.maxHp){ P.hp++; A.sHeal(); popText(P.x,P.y-34,'+1 LIFE','#78ffa8',22); ring(P.x,P.y,90,'rgba(120,255,168,0.6)',0.5,3); }
+  }
+  checkLevel();
+}
+
+function hurtPlayer(){
+  if(P.inv>0 || G.mode!=='play' && G.mode!=='intro') return;
+  P.hp--;
+  P.inv = 1.35;
+  G.combo = 0;
+  G.dmgFlash = 1;
+  A.sHurt();
+  shakeIt(20);
+  G.hitStop = Math.max(G.hitStop, 0.11);
+  spark(P.x,P.y,22,'#ff5566',90,380,0.25,0.6,3.5);
+  ring(P.x,P.y,140,'rgba(255,80,100,0.7)',0.5,4);
+  // drop half the orbit on hit
+  var drop = Math.floor(orbit.length/2);
+  for(var i=0;i<drop;i++) orbit.pop();
+  redistribute();
+  if(P.hp<=0) die();
+}
+
+var REVIVE_SECONDS = 8;
+
+/* Death is now only the start of the end-of-run sequence:
+     die -> [revive offer] -> finishRun -> [midgame ad] -> game over
+   Payout lives in finishRun, not here, so a revived run is not paid twice. */
+function die(){
+  if(G.ended) return;
+  G.ended = true;
+  G.mode = 'dying';
+  G.deathT = 0;
+  G.postDeath = false;
+  A.sDead();
+  A.setHum(0,0);
+  shakeIt(30); G.flash=0.8;
+  spark(P.x,P.y,70,C.player,120,520,0.4,1.1,4);
+  ring(P.x,P.y,260,hexA(C.player,0.7),0.8,5);
+  if(window.CG) window.CG.gameplayStop();
+}
+
+/* Only offer a revive on a run worth saving, once per run, and never when we
+   know the request cannot succeed - a button that can never work is a
+   CrazyGames rejection cause. */
+function reviveAvailable(){
+  return !!(window.CG && window.CG.ready && window.CG.adsOk && !G.revived && G.wave >= 3);
+}
+/* The SDK enforces its own 3-minute midgame cap, so this only adds the rules
+   it cannot know: not after a trivially short run, and never a second ad in a
+   run where the player already sat through a rewarded one. */
+function midgameEligible(){
+  // One ad opportunity per run. If the player already engaged with the
+  // rewarded offer - watched it OR had it fail on them - do not follow it
+  // with a second request. Chaining ads is against the ad requirements and
+  // is a miserable thing to do to someone who just died.
+  return !!(window.CG && window.CG.ready && window.CG.adsOk &&
+            !G.watchedAd && !G.adAttempted && G.t >= 45);
+}
+
+function afterDeath(){
+  if(reviveAvailable()){ G.mode = 'revive'; G.reviveT = REVIVE_SECONDS; }
+  else finishRun();
+}
+
+function showOver(){ G.mode = 'over'; G.overT = 0; }
+
+function finishRun(){
+  if(G.runFinished){ showOver(); return; }
+  G.runFinished = true;
+
+  G.fluxEarned = fluxFor(G.score, G.wave);
+  addFlux(G.fluxEarned);
+  var best = parseInt(store('mgn.best')||'0',10);
+  if(G.score > best){ store('mgn.best', String(G.score)); G.newBest = true; }
+  var bw = parseInt(store('mgn.bestwave')||'0',10);
+  if(G.wave > bw) store('mgn.bestwave', String(G.wave));
+  if(G.newBest && window.CG) window.CG.happytime();
+  if(window.CG) window.CG.gameplayStop();
+
+  // Death is an allowed midgame placement; the panel appears when it is done.
+  if(midgameEligible()) window.CG.requestAd('midgame', showOver, showOver);
+  else showOver();
+}
+
+function takeRevive(){
+  if(G.adBusy || G.revived || G.mode!=='revive') return;
+  G.adAttempted = true;
+  window.CG.requestAd('rewarded', doRevive, function(code){
+    // Never reward on adError - the run simply ends.
+    G.adMsg = (code==='unfilled') ? 'NO AD AVAILABLE RIGHT NOW' : 'AD UNAVAILABLE';
+    G.adMsgT = 2.2;
+    finishRun();
+  });
+}
+
+function doRevive(){
+  G.revived = true;
+  G.watchedAd = true;
+  G.ended = false;
+  G.postDeath = false;
+  G.mode = 'play';
+  P.hp = Math.max(1, Math.min(2, P.maxHp));
+  P.inv = 3.0;
+  bolts.length = 0;
+  clearArea(300);
+  A.sHeal();
+  G.flash = 0.7;
+  shakeIt(18);
+  ring(P.x, P.y, 340, hexA(C.player,0.8), 0.8, 6);
+  popText(P.x, P.y-46, 'REVIVED', C.player, 30);
+  if(window.CG) window.CG.gameplayStart();
+}
+
+/* Buys breathing room, not points. Watching an ad must never move the
+   scoreboard or the leaderboard stops meaning anything. */
+function clearArea(r){
+  for(var i=enemies.length-1;i>=0;i--){
+    var e = enemies[i];
+    var d = Math.max(1, len(e.x-P.x, e.y-P.y));
+    if(e.type==='boss'){
+      e.vx += (e.x-P.x)/d*280; e.vy += (e.y-P.y)/d*280;
+      continue;
+    }
+    if(d < r){
+      spark(e.x, e.y, 10, e.col, 90, 300, 0.2, 0.5, 3);
+      enemies.splice(i,1);
+    }
+  }
+}
+
+function restart(){
+  reset();
+  G.mode = store('mgn.played')==='1' ? 'play' : 'intro';
+  if(G.mode==='play' && G.wave===0) startWave(1);
+  A.sUi();
+  if(window.CG) window.CG.gameplayStart();
+}
+
+function togglePause(){
+  if(G.mode!=='play') return;
+  G.paused = !G.paused;
+  A.sUi();
+}
+
+/* ------------------------------ level ups ------------------------------ */
+function checkLevel(){
+  if(G.xp < G.xpNeed) return;
+  G.xp -= G.xpNeed;
+  G.level++;
+  G.xpNeed = Math.round(9 + G.level*4.6);
+  openLevelUp();
+}
+/* Weighted draw without replacement: each slot is rolled against the weights
+   of whatever is still in the pool, so a hand can hold at most one of a given
+   upgrade and epics stay scarce even when few cards remain unmaxed. */
+function openLevelUp(){
+  var pool = [], i;
+  for(i=0;i<UPGRADES.length;i++){
+    var u = UPGRADES[i];
+    if(((G.taken && G.taken[u.id]) || 0) < u.max) pool.push(u);
+  }
+  if(!pool.length) return;
+
+  var picked = [], best = 0;
+  while(picked.length < 3 && pool.length){
+    var total = 0, j;
+    for(j=0;j<pool.length;j++) total += RARITY[pool[j].r].w;
+    var roll = Math.random()*total, chosen = pool.length-1;
+    for(j=0;j<pool.length;j++){
+      roll -= RARITY[pool[j].r].w;
+      if(roll <= 0){ chosen = j; break; }
+    }
+    if(pool[chosen].r > best) best = pool[chosen].r;
+    picked.push(pool[chosen]);
+    pool.splice(chosen,1);
+  }
+
+  G.cards = picked;
+  G.bestRarity = best;
+  G.mode = 'levelup';
+  G.cardT = 0;
+  if(best >= EPIC) A.sEpic(); else A.sLevel();
+  G.flash = 0.35 + best*0.12;
+}
+function chooseUpgrade(i){
+  if(G.mode!=='levelup') return;
+  var u = G.cards[i];
+  if(!u) return;
+  if(!G.taken) G.taken = {};
+  G.taken[u.id] = (G.taken[u.id]||0)+1;
+  u.ap();
+  G.mode = 'play';
+  G.cards = [];
+  A.sUi();
+  var rc = RARITY[u.r].col;
+  ring(P.x,P.y,150,hexA(rc,0.7),0.55,4);
+  popText(P.x, P.y-40, u.name, rc, 24);
+}
+
+/* -------------------------------- update ------------------------------- */
+function update(dt){
+  G.t += dt;
+
+  /* ---- timers / global fx ---- */
+  G.shake = Math.max(0, G.shake - G.shake*7*dt - 12*dt);
+  G.flash = Math.max(0, G.flash - dt*2.4);
+  G.pulse = Math.max(0, G.pulse - dt*2.2);
+  G.chroma = Math.max(0, G.chroma - dt*1.4);
+  G.dmgFlash = Math.max(0, G.dmgFlash - dt*1.8);
+  G.waveBanner = Math.max(0, G.waveBanner - dt);
+  if(G.comboT>0){ G.comboT-=dt; if(G.comboT<=0) G.combo=0; }
+  P.inv = Math.max(0, P.inv-dt);
+  P.blastCool = Math.max(0, P.blastCool-dt);
+
+  var alive = (G.mode==='play' || G.mode==='intro' || G.mode==='levelup');
+
+  /* ---- intro script ---- */
+  if(G.mode==='intro'){
+    G.introT += dt;
+    if(G.introStep===0 && G.introT>2.1){ G.introStep=1; G.introT=0; }
+    if(G.introStep===1 && (G.introPulled || G.introT>7)){ G.introStep=2; G.introT=0; }
+    if(G.introStep===2 && (G.introBlasted || G.introT>7)){
+      G.introStep=3; G.introT=0;
+      // give the player something to shoot before wave 1 starts
+      for(var q=0;q<3;q++) spawnAt('drone', edgePoint());
+    }
+    if(G.introStep===3 && G.introT>1.4){
+      G.introStep=4; store('mgn.played','1');
+      G.mode='play'; startWave(1);
+    }
+  }
+
+  /* ---- player movement ---- */
+  var kv = keyVector();
+  var tx=P.x, ty=P.y, useKeys = kv[2];
+  var magHeld = (IN.down || IN.kMag) && alive && G.mode!=='levelup';
+
+  var maxSpd = P.spd * (magHeld ? P.holdMul : 1);
+  var dvx, dvy;
+  if(!alive){
+    dvx = 0; dvy = 0;
+  } else if(useKeys){
+    dvx = kv[0]*maxSpd; dvy = kv[1]*maxSpd;
+  } else if(IN.has){
+    var ddx = IN.x-P.x, ddy = IN.y-P.y, dd = len(ddx,ddy);
+    if(dd < 4){ dvx=0; dvy=0; }
+    else {
+      var want = Math.min(maxSpd, dd*7.5);
+      dvx = ddx/dd*want; dvy = ddy/dd*want;
+    }
+  } else { dvx=0; dvy=0; }
+
+  var k = 1-Math.exp(-15*dt);
+  P.vx += (dvx-P.vx)*k;
+  P.vy += (dvy-P.vy)*k;
+  P.x += P.vx*dt; P.y += P.vy*dt;
+
+  var pad = P.r+4;
+  if(P.x<pad){ P.x=pad; P.vx*=-0.3; }
+  if(P.x>VW-pad){ P.x=VW-pad; P.vx*=-0.3; }
+  if(P.y<pad){ P.y=pad; P.vy*=-0.3; }
+  if(P.y>VH-pad){ P.y=VH-pad; P.vy*=-0.3; }
+
+  /* ---- magnet + orbit ---- */
+  P.orbBase = (P.orbBase||0) + (P.omega + orbit.length*0.02)*dt;
+  var fill = orbit.length/Math.max(1,P.cap);
+  A.setHum(magHeld?(0.35+fill*0.65):0, fill);
+
+  if(magHeld){
+    var pull = 1250*P.pullMul;
+    for(var i=0;i<scrap.length;i++){
+      var s = scrap[i];
+      var dx=P.x-s.x, dy=P.y-s.y, d=len(dx,dy);
+      if(d < P.magR && d>0.01){
+        var f = pull*(1 - d/P.magR*0.55)/Math.max(28,d);
+        s.vx += dx*f*dt; s.vy += dy*f*dt;
+        s.vx *= (1-1.6*dt); s.vy *= (1-1.6*dt);
+        if(d < P.orbR+12 && orbit.length<P.cap){
+          captureInto('scrap', s.x, s.y, s.r);
+          scrap.splice(i,1); i--;
+          A.sPull();
+          G.introPulled = true;
+          continue;
+        }
+      }
+    }
+    for(var b=0;b<bolts.length;b++){
+      var bo = bolts[b];
+      if(bo.mag===false) continue;   // lancer spikes cannot be caught
+      var bx=P.x-bo.x, by=P.y-bo.y, bd=len(bx,by);
+      if(bd < P.magR*1.05 && bd>0.01){
+        var bf = pull*1.15*(1 - bd/(P.magR*1.05)*0.5)/Math.max(28,bd);
+        bo.vx += bx*bf*dt; bo.vy += by*bf*dt;
+        bo.vx *= (1-2.2*dt); bo.vy *= (1-2.2*dt);
+        if(bd < P.orbR+12 && orbit.length<P.cap){
+          captureInto('bolt', bo.x, bo.y, 8);
+          bolts.splice(b,1); b--;
+          A.sCatch();
+          spark(bo.x,bo.y,5,C.bolt,60,180,0.12,0.3,2.4);
+          G.introPulled = true;
+          continue;
+        }
+      }
+    }
+  }
+
+  // orbit item positions + grind damage
+  var n = orbit.length;
+  for(var oi=0; oi<n; oi++){
+    var o = orbit[oi];
+    o.t += dt;
+    o.spinA = (o.spinA||0) + o.spin*dt;
+    var ang = P.orbBase + (o.slot||0)*TAU/n;
+    o.cur = o.cur + (P.orbR-o.cur)*(1-Math.exp(-14*dt));
+    o.x = P.x + Math.cos(ang)*o.cur;
+    o.y = P.y + Math.sin(ang)*o.cur;
+  }
+  if(n>0){
+    for(var ei=0; ei<enemies.length; ei++){
+      var en = enemies[ei];
+      if(en.dead || en.spawnA>0) continue;
+      for(var oj=orbit.length-1; oj>=0; oj--){
+        var ob = orbit[oj];
+        if(len(en.x-ob.x, en.y-ob.y) < en.r+ob.r+2){
+          damageEnemy(en, P.orbDmg + (ob.kind==='bolt'?1:0), 0, 0);
+          spark(ob.x,ob.y,4,C.shot,60,220,0.1,0.25,2.6);
+          orbit.splice(oj,1); redistribute();
+          n = orbit.length;
+          break;
+        }
+      }
+    }
+  }
+
+  // static charge
+  if(P.stat>0 && orbit.length>0){
+    P.statT -= dt;
+    if(P.statT<=0){
+      P.statT = 1.05/P.stat;
+      var best=null, bestD=1e9;
+      for(var si=0; si<enemies.length; si++){
+        var se=enemies[si];
+        if(se.dead||se.spawnA>0) continue;
+        var sd=len(se.x-P.x, se.y-P.y);
+        if(sd<300 && sd<bestD){ bestD=sd; best=se; }
+      }
+      if(best){
+        zaps.push({x1:P.x,y1:P.y,x2:best.x,y2:best.y,life:0.16,max:0.16});
+        damageEnemy(best, P.stat+1, 0, 0);   // epic: scales with stacks
+        A.tone(1400,0.07,'square',0.07,600);
+      }
+    }
+  }
+
+  if(IN.justUp){
+    if(IN.swallow) IN.swallow = false;
+    else if(alive && G.mode!=='levelup') doBlast();
+  }
+  IN.justUp=false; IN.justDown=false;
+
+  /* ---- scrap field ---- */
+  for(var s2=0; s2<scrap.length; s2++){
+    var sc = scrap[s2];
+    sc.x += sc.vx*dt; sc.y += sc.vy*dt;
+    sc.vx *= (1-0.7*dt); sc.vy *= (1-0.7*dt);
+    sc.a += sc.sp*dt;
+    if(sc.x<12){sc.x=12;sc.vx=Math.abs(sc.vx)*0.6;}
+    if(sc.x>VW-12){sc.x=VW-12;sc.vx=-Math.abs(sc.vx)*0.6;}
+    if(sc.y<12){sc.y=12;sc.vy=Math.abs(sc.vy)*0.6;}
+    if(sc.y>VH-12){sc.y=VH-12;sc.vy=-Math.abs(sc.vy)*0.6;}
+  }
+  if(scrap.length < G.scrapCap){
+    G.scrapT = (G.scrapT||0) - dt;
+    if(G.scrapT<=0){ G.scrapT = 0.35/P.pullMul; addScrap(false); }
+  }
+  while(scrap.length > G.scrapCap+30) scrap.shift();
+
+  updateEnemies(dt);
+  updateBolts(dt);
+  updateShots(dt);
+  updateWaveFlow(dt);
+  updateParticles(dt);
+}
+
+
+/* ------------------------------ enemies -------------------------------- */
+var SHOT_SEEK = 330, SHOT_TURN = 7.5;
+var LANCE_TELL = 0.85;
+var RAGE_AFTER = 22;
+
+/* Stragglers get faster the longer a wave drags on, so a wave can never
+   stall into a boring stalemate. Also drives the pace of a run upward. */
+function rageMul(){
+  if(G.mode!=='play' || G.waveT <= RAGE_AFTER) return 1;
+  return 1 + Math.min(0.85, (G.waveT-RAGE_AFTER)*0.05);
+}
+
+function updateEnemies(dt){
+  var rage = rageMul();
+  for(var i=enemies.length-1; i>=0; i--){
+    var e = enemies[i];
+    if(e.dead){ enemies.splice(i,1); continue; }
+    e.t += dt;
+    e.flash = Math.max(0, e.flash-dt*6);
+
+    if(e.spawnA>0){
+      e.spawnA -= dt;
+      continue;
+    }
+
+    var es = e.spd * (e.type==='boss' ? 1 : rage);
+    var dx = P.x-e.x, dy = P.y-e.y, d = Math.max(0.01, len(dx,dy));
+    var ux = dx/d, uy = dy/d;
+
+    if(e.type==='drone'){
+      e.vx += ux*es*3.2*dt; e.vy += uy*es*3.2*dt;
+      var sp = len(e.vx,e.vy);
+      if(sp>es){ e.vx=e.vx/sp*es; e.vy=e.vy/sp*es; }
+    }
+    else if(e.type==='spinner'){
+      e.wob += dt*5.5;
+      var px=-uy, py=ux;
+      var swirl = Math.sin(e.wob)*0.85;
+      e.vx += (ux+px*swirl)*es*3.4*dt;
+      e.vy += (uy+py*swirl)*es*3.4*dt;
+      var sp2 = len(e.vx,e.vy);
+      if(sp2>es){ e.vx=e.vx/sp2*es; e.vy=e.vy/sp2*es; }
+    }
+    else if(e.type==='shooter'){
+      var want = 320;
+      var drive = (d-want)/140;
+      drive = clamp(drive,-1,1);
+      var sx=-uy, sy=ux;
+      var strafe = Math.sin(e.t*0.9+e.wob)*0.9;
+      e.vx += (ux*drive + sx*strafe)*es*3*dt;
+      e.vy += (uy*drive + sy*strafe)*es*3*dt;
+      var sp3 = len(e.vx,e.vy);
+      if(sp3>es){ e.vx=e.vx/sp3*es; e.vy=e.vy/sp3*es; }
+      e.fire -= dt;
+      if(e.fire<=0){
+        e.fire = rnd(1.7,2.4);
+        fireBolt(e, ux, uy, 250, 1);
+      }
+    }
+    else if(e.type==='splitter'){
+      e.vx += ux*es*2.6*dt; e.vy += uy*es*2.6*dt;
+      var sp4=len(e.vx,e.vy);
+      if(sp4>es){ e.vx=e.vx/sp4*es; e.vy=e.vy/sp4*es; }
+    }
+    else if(e.type==='brute'){
+      e.vx += ux*es*2.2*dt; e.vy += uy*es*2.2*dt;
+      var sp5=len(e.vx,e.vy);
+      if(sp5>es){ e.vx=e.vx/sp5*es; e.vy=e.vy/sp5*es; }
+    }
+    else if(e.type==='lancer'){
+      // Snipes from range with a NON-magnetic spike, so holding the magnet
+      // is no longer a free bullet shield. Pure dodge pressure.
+      var far = 400;
+      var push = clamp((d-far)/150,-1,1);
+      var lx=-uy, ly=ux;
+      var sway = Math.sin(e.t*0.7+e.wob)*0.7;
+      e.vx += (ux*push + lx*sway)*es*2.4*dt;
+      e.vy += (uy*push + ly*sway)*es*2.4*dt;
+      var sp6 = len(e.vx,e.vy);
+      if(sp6>es){ e.vx=e.vx/sp6*es; e.vy=e.vy/sp6*es; }
+      if(e.charge>0){
+        e.charge -= dt;
+        e.aimX = ux; e.aimY = uy;
+        if(e.charge<=0){
+          fireBolt(e, e.aimX, e.aimY, 660, 1, false);
+          A.tone(1500,0.16,'sawtooth',0.10,300);
+          e.fire = rnd(2.2,3.2);
+        }
+      } else {
+        e.fire -= dt;
+        if(e.fire<=0){ e.charge = LANCE_TELL; e.aimX=ux; e.aimY=uy; A.tone(240,0.5,'triangle',0.06,700); }
+      }
+    }
+    else if(e.type==='boss'){
+      updateBoss(e, dt, ux, uy, d);
+    }
+
+    e.vx *= (1-1.1*dt); e.vy *= (1-1.1*dt);
+    e.x += e.vx*dt; e.y += e.vy*dt;
+
+    var m = e.r+2;
+    if(e.x<m){ e.x=m; e.vx=Math.abs(e.vx)*0.5; }
+    if(e.x>VW-m){ e.x=VW-m; e.vx=-Math.abs(e.vx)*0.5; }
+    if(e.y<m){ e.y=m; e.vy=Math.abs(e.vy)*0.5; }
+    if(e.y>VH-m){ e.y=VH-m; e.vy=-Math.abs(e.vy)*0.5; }
+
+    // contact with player
+    if(G.mode!=='levelup' && len(P.x-e.x, P.y-e.y) < P.r + e.r*0.86){
+      hurtPlayer();
+      var kx = (P.x-e.x), ky = (P.y-e.y), kd = Math.max(0.01,len(kx,ky));
+      P.vx = kx/kd*430; P.vy = ky/kd*430;
+      if(e.type!=='brute' && e.type!=='boss'){ e.vx = -kx/kd*260; e.vy = -ky/kd*260; }
+    }
+  }
+}
+
+function fireBolt(e, ux, uy, speed, dmg, magnetic){
+  var mag = (magnetic===undefined) ? true : magnetic;
+  bolts.push({x:e.x+ux*(e.r+6), y:e.y+uy*(e.r+6), vx:ux*speed, vy:uy*speed,
+              r:mag?8:6, life:mag?6:3.2, a:rnd(0,TAU), mag:mag});
+  if(mag) A.tone(300,0.1,'square',0.07,180);
+}
+
+function updateBoss(e, dt, ux, uy, d){
+  e.phaseT -= dt;
+  var cx = VW/2, cy = VH/2;
+  var tox = cx-e.x, toy = cy-e.y;
+  var td = Math.max(0.01, len(tox,toy));
+  var driftx = tox/td, drifty = toy/td;
+  var orbitAng = e.t*0.55;
+  var tgx = cx + Math.cos(orbitAng)*260, tgy = cy + Math.sin(orbitAng)*150;
+  var gx = tgx-e.x, gy = tgy-e.y, gd = Math.max(0.01,len(gx,gy));
+  e.vx += gx/gd*e.spd*2.4*dt;
+  e.vy += gy/gd*e.spd*2.4*dt;
+  var sp = len(e.vx,e.vy);
+  if(sp>e.spd){ e.vx=e.vx/sp*e.spd; e.vy=e.vy/sp*e.spd; }
+
+  if(e.phaseT<=0){
+    e.phase = (e.phase+1)%3;
+    e.phaseT = e.phase===1 ? 3.0 : 2.6;
+    e.sub = 0; e.subT = 0.4;
+    if(e.phase===0) ring(e.x,e.y,e.r*2.6,'rgba(255,47,94,0.6)',0.5,4);
+  }
+  e.subT -= dt;
+  if(e.subT<=0){
+    if(e.phase===0){ // radial burst
+      e.subT = 1.05;
+      var count = 14;
+      var off = rnd(0,TAU);
+      for(var i=0;i<count;i++){
+        var a = off + i*TAU/count;
+        fireBolt(e, Math.cos(a), Math.sin(a), 195, 1);
+      }
+      shakeIt(5);
+    } else if(e.phase===1){ // spiral stream
+      e.subT = 0.10;
+      e.spiral = (e.spiral||0) + 0.62;
+      fireBolt(e, Math.cos(e.spiral), Math.sin(e.spiral), 235, 1);
+      fireBolt(e, Math.cos(e.spiral+Math.PI), Math.sin(e.spiral+Math.PI), 235, 1);
+    } else { // summon + aimed shots
+      e.subT = 1.3;
+      e.sub++;
+      if(e.sub<=2){
+        for(var k=0;k<3;k++){
+          var an = rnd(0,TAU);
+          var s = spawnAt('drone', {x:clamp(e.x+Math.cos(an)*70,30,VW-30), y:clamp(e.y+Math.sin(an)*70,30,VH-30)});
+          s.spawnA = 0.35;
+        }
+      } else {
+        for(var q=-1;q<=1;q++){
+          var aa = Math.atan2(uy,ux)+q*0.24;
+          fireBolt(e, Math.cos(aa), Math.sin(aa), 300, 1);
+        }
+      }
+    }
+  }
+}
+
+/* -------------------------------- bolts -------------------------------- */
+function updateBolts(dt){
+  for(var i=bolts.length-1;i>=0;i--){
+    var b = bolts[i];
+    b.life -= dt;
+    b.a += dt*6;
+    b.x += b.vx*dt; b.y += b.vy*dt;
+    if(b.life<=0 || b.x<-40||b.x>VW+40||b.y<-40||b.y>VH+40){ bolts.splice(i,1); continue; }
+    if(G.mode!=='levelup' && len(P.x-b.x,P.y-b.y) < P.r+b.r*0.8){
+      bolts.splice(i,1);
+      hurtPlayer();
+      continue;
+    }
+  }
+}
+
+/* -------------------------------- shots -------------------------------- */
+function updateShots(dt){
+  for(var i=shots.length-1;i>=0;i--){
+    var s = shots[i];
+    s.life -= dt;
+    if(s.shock){
+      s.r += (s.max - s.r)*(1-Math.exp(-9*dt)) + 260*dt;
+      for(var j=0;j<enemies.length;j++){
+        var e2 = enemies[j];
+        if(e2.dead||e2.spawnA>0) continue;
+        if(s.hitIds.indexOf(e2)>=0) continue;
+        var dd = len(e2.x-s.x, e2.y-s.y);
+        if(dd < s.r + e2.r && dd > s.r - 60){
+          s.hitIds.push(e2);
+          var nx=(e2.x-s.x)/Math.max(0.01,dd), ny=(e2.y-s.y)/Math.max(0.01,dd);
+          damageEnemy(e2, s.dmg, nx*300, ny*300);
+        }
+      }
+      if(s.life<=0) shots.splice(i,1);
+      continue;
+    }
+    s.a += dt*10;
+
+    // Magnetically guided: slugs curve toward nearby enemies. This is what
+    // makes an aimless radial blast actually lethal - without it the player
+    // can hold the button forever and never clear a wave.
+    var tgt=null, tdist=SHOT_SEEK;
+    for(var h=0;h<enemies.length;h++){
+      var en2 = enemies[h];
+      if(en2.dead || en2.spawnA>0) continue;
+      if(s.hitIds.indexOf(en2)>=0) continue;
+      var hd = len(en2.x-s.x, en2.y-s.y);
+      if(hd < tdist){ tdist = hd; tgt = en2; }
+    }
+    if(tgt){
+      var cur = Math.atan2(s.vy,s.vx);
+      var want = Math.atan2(tgt.y-s.y, tgt.x-s.x);
+      var diff = ((want-cur+Math.PI*3)%TAU)-Math.PI;
+      var maxTurn = SHOT_TURN*dt;
+      var na = cur + clamp(diff,-maxTurn,maxTurn);
+      var spd = len(s.vx,s.vy);
+      s.vx = Math.cos(na)*spd; s.vy = Math.sin(na)*spd;
+    }
+
+    s.x += s.vx*dt; s.y += s.vy*dt;
+
+    var bounced=false;
+    if(s.bounce>0){
+      if(s.x<s.r){ s.x=s.r; s.vx=Math.abs(s.vx); bounced=true; }
+      else if(s.x>VW-s.r){ s.x=VW-s.r; s.vx=-Math.abs(s.vx); bounced=true; }
+      if(s.y<s.r){ s.y=s.r; s.vy=Math.abs(s.vy); bounced=true; }
+      else if(s.y>VH-s.r){ s.y=VH-s.r; s.vy=-Math.abs(s.vy); bounced=true; }
+      if(bounced){ s.bounce--; spark(s.x,s.y,3,C.shot,50,160,0.1,0.22,2); }
+    }
+
+    if(s.life<=0 || s.x<-30||s.x>VW+30||s.y<-30||s.y>VH+30){
+      shots.splice(i,1); continue;
+    }
+
+    // trail
+    if(Math.random()<0.55){
+      parts.push({x:s.x,y:s.y,vx:rnd(-14,14),vy:rnd(-14,14),life:0.16,max:0.16,r:s.r*0.55,col:s.kind==='bolt'?C.bolt:C.shot,drag:3});
+    }
+
+    for(var k=0;k<enemies.length;k++){
+      var e = enemies[k];
+      if(e.dead||e.spawnA>0) continue;
+      if(s.hitIds.indexOf(e)>=0) continue;
+      if(len(e.x-s.x, e.y-s.y) < e.r + s.r){
+        s.hitIds.push(e);
+        var vl = Math.max(0.01, len(s.vx,s.vy));
+        damageEnemy(e, s.dmg, s.vx/vl*260, s.vy/vl*260);
+        s.pierce--;
+        if(s.pierce<0){ shots.splice(i,1); break; }
+      }
+    }
+  }
+}
+
+/* ------------------------------ wave flow ------------------------------ */
+function updateWaveFlow(dt){
+  if(G.mode!=='play') return;
+  G.waveT += dt;
+
+  for(var i=G.spawnQ.length-1;i>=0;i--){
+    if(G.waveT >= G.spawnQ[i].at){
+      var q = G.spawnQ[i];
+      var e = spawnAt(q.t, q.pt);
+      if(q.t==='boss') G.bossRef = e;
+      G.spawnQ.splice(i,1);
+    }
+  }
+
+  if(G.spawnQ.length===0 && enemies.length===0){
+    if(!G.clearShown){ G.clearShown = true; popText(VW/2, VH/2-60, 'WAVE CLEAR', C.player, 34); }
+    G.betweenT += dt;
+    if(G.betweenT > 1.6){
+      G.betweenT = 0; G.clearShown = false;
+      startWave(G.wave+1);
+    }
+  } else {
+    G.betweenT = 0; G.clearShown = false;
+  }
+}
+
+/* ------------------------------ particles ------------------------------ */
+function updateParticles(dt){
+  for(var i=parts.length-1;i>=0;i--){
+    var p = parts[i];
+    p.life -= dt;
+    if(p.life<=0){ parts.splice(i,1); continue; }
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    var dr = 1-Math.min(0.9, p.drag*dt);
+    p.vx*=dr; p.vy*=dr;
+  }
+  for(var j=pops.length-1;j>=0;j--){
+    var t = pops[j];
+    t.life -= dt;
+    if(t.life<=0){ pops.splice(j,1); continue; }
+    t.y += t.vy*dt; t.vy *= (1-2*dt);
+  }
+  for(var w=waves.length-1;w>=0;w--){
+    var wv = waves[w];
+    wv.life -= dt;
+    if(wv.life<=0){ waves.splice(w,1); continue; }
+    wv.r += (wv.max-wv.r)*(1-Math.exp(-7*dt));
+  }
+  for(var z=zaps.length-1;z>=0;z--){
+    zaps[z].life -= dt;
+    if(zaps[z].life<=0) zaps.splice(z,1);
+  }
+}
+
+
+/* ------------------------------ draw utils ----------------------------- */
+function text(str,x,y,size,col,align,weight,alpha,track){
+  ctx.globalAlpha = alpha===undefined?1:alpha;
+  ctx.fillStyle = col||C.text;
+  ctx.textAlign = align||'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = (weight||700)+' '+size+'px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';
+  if(track){
+    var total=0, i;
+    for(i=0;i<str.length;i++) total += ctx.measureText(str[i]).width + track;
+    total -= track;
+    var sx = align==='center' ? x-total/2 : (align==='right' ? x-total : x);
+    ctx.textAlign='left';
+    for(i=0;i<str.length;i++){
+      ctx.fillText(str[i], sx, y);
+      sx += ctx.measureText(str[i]).width + track;
+    }
+  } else {
+    ctx.fillText(str,x,y);
+  }
+  ctx.globalAlpha = 1;
+}
+function poly(x,y,r,sides,rot){
+  ctx.beginPath();
+  for(var i=0;i<sides;i++){
+    var a = rot + i*TAU/sides;
+    var px = x+Math.cos(a)*r, py = y+Math.sin(a)*r;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+function inRect(px,py,r){ return px>=r.x && px<=r.x+r.w && py>=r.y && py<=r.y+r.h; }
+
+/* One spacing scale for every screen. Panels breathe at PAD, groups separate
+   at GAP, and a hairline rule does the work that cramped spacing used to. */
+var PAD = 28, GAP = 36;
+
+var BTN_MUTE  = {x:VW-114, y:VH-76, w:44, h:44};
+var BTN_PAUSE = {x:VW-60,  y:VH-76, w:44, h:44};
+
+function cardRect(i){ return {x:130 + i*352, y:182, w:316, h:384}; }
+
+/* Hairline divider - groups content without drawing another box around it. */
+function hr(x1, x2, y, alpha){
+  ctx.globalAlpha = (alpha===undefined?0.10:alpha);
+  ctx.strokeStyle = '#eaf2ff';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x1, y+0.5); ctx.lineTo(x2, y+0.5); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+/* -------------------------------- render ------------------------------- */
+function render(rdt){
+  var sx=0, sy=0;
+  if(G.shake>0.2){ sx = rnd(-G.shake,G.shake); sy = rnd(-G.shake,G.shake); }
+
+  // background fill (device space)
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#02030a';
+  ctx.fillRect(0,0,cssW,cssH);
+
+  var base = function(){ ctx.setTransform(scale*dpr,0,0,scale*dpr, offX*dpr, offY*dpr); };
+
+  base();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0,0,VW,VH); ctx.clip();
+  ctx.translate(sx,sy);
+
+  drawBackground();
+
+  ctx.globalCompositeOperation = 'lighter';
+  drawWaveRings();
+  drawScrap();
+  drawShots();
+  drawBolts();
+  drawEnemies();
+  drawZaps();
+  drawPlayer();
+  drawParticles();
+  ctx.globalCompositeOperation = 'source-over';
+  drawPops();
+  ctx.restore();
+
+  // HUD (no shake)
+  base();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0,0,VW,VH); ctx.clip();
+  if(G.mode!=='cores') drawHUD();   // the core menu is its own full screen
+  if(G.mode==='intro') drawIntro();
+  if(G.mode==='levelup') drawLevelUp();
+  if(G.mode==='over') drawGameOver();
+  if(G.mode==='cores') drawCores();
+  if(G.mode==='revive') drawRevive();
+  if(G.adMsgT > 0) text(G.adMsg, VW/2, VH-92, 14, C.scrap, 'center', 800, clamp(G.adMsgT,0,1), 3);
+  if(G.adBusy) drawAdBusy();
+  if(G.paused && G.mode==='play') drawPaused();
+  drawCursor();
+
+  if(G.flash>0.001){
+    ctx.globalCompositeOperation='lighter';
+    ctx.fillStyle='rgba(180,220,255,'+(G.flash*0.30)+')';
+    ctx.fillRect(0,0,VW,VH);
+    ctx.globalCompositeOperation='source-over';
+  }
+  if(G.dmgFlash>0.001){
+    // Kept off the centre of the screen: the moment you take a hit is the
+    // moment you most need to see what is coming next.
+    var gr = ctx.createRadialGradient(VW/2,VH/2,VH*0.42, VW/2,VH/2,VH*0.88);
+    gr.addColorStop(0,'rgba(255,40,70,0)');
+    gr.addColorStop(1,'rgba(255,40,70,'+(G.dmgFlash*0.48)+')');
+    ctx.fillStyle=gr; ctx.fillRect(0,0,VW,VH);
+  }
+  ctx.restore();
+}
+
+function drawBackground(){
+  var pulse = G.pulse;
+  ctx.fillStyle = '#05070f';
+  ctx.fillRect(0,0,VW,VH);
+
+  // subtle drifting grid
+  var step = 64, t = G.t*10;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(84,150,255,'+(0.055+pulse*0.10)+')';
+  ctx.beginPath();
+  for(var x=(t%step)-step; x<VW+step; x+=step){ ctx.moveTo(x,0); ctx.lineTo(x,VH); }
+  for(var y=(t*0.6%step)-step; y<VH+step; y+=step){ ctx.moveTo(0,y); ctx.lineTo(VW,y); }
+  ctx.stroke();
+
+  // arena glow border
+  ctx.globalCompositeOperation='lighter';
+  var g = ctx.createLinearGradient(0,0,0,VH);
+  g.addColorStop(0,'rgba(60,120,255,0.10)');
+  g.addColorStop(0.5,'rgba(60,120,255,0.00)');
+  g.addColorStop(1,'rgba(180,60,255,0.10)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,VW,VH);
+  ctx.globalCompositeOperation='source-over';
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(124,200,255,'+(0.22+pulse*0.4)+')';
+  ctx.strokeRect(1.5,1.5,VW-3,VH-3);
+
+  // vignette
+  var vg = ctx.createRadialGradient(VW/2,VH/2,VH*0.34, VW/2,VH/2,VH*0.95);
+  vg.addColorStop(0,'rgba(0,0,0,0)');
+  vg.addColorStop(1,'rgba(0,0,0,0.60)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,VW,VH);
+}
+
+function drawWaveRings(){
+  for(var i=0;i<waves.length;i++){
+    var w = waves[i], a = clamp(w.life/0.5,0,1);
+    ctx.globalAlpha = a*0.85;
+    ctx.strokeStyle = w.col;
+    ctx.lineWidth = w.w*a;
+    ctx.beginPath(); ctx.arc(w.x,w.y,w.r,0,TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawScrap(){
+  for(var i=0;i<scrap.length;i++){
+    var s = scrap[i];
+    blob(s.x,s.y,s.r*2.6,'rgba(255,190,70,0.20)');
+    ctx.save();
+    ctx.translate(s.x,s.y); ctx.rotate(s.a);
+    ctx.fillStyle = C.scrap;
+    ctx.fillRect(-s.r*0.62,-s.r*0.62,s.r*1.24,s.r*1.24);
+    ctx.restore();
+  }
+}
+
+function drawBolts(){
+  for(var i=0;i<bolts.length;i++){
+    var b = bolts[i];
+    if(b.mag===false){
+      // lancer spike: a hard dart you must dodge, never catch
+      var ang = Math.atan2(b.vy,b.vx);
+      blob(b.x,b.y,16,'rgba(201,214,255,0.40)');
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(ang);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(13,0); ctx.lineTo(-7,4.5); ctx.lineTo(-3,0); ctx.lineTo(-7,-4.5);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='rgba(201,214,255,0.55)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-8,0); ctx.lineTo(-30,0); ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+    blob(b.x,b.y,20,'rgba(255,93,177,0.42)');
+    ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(b.a);
+    ctx.fillStyle = '#ffd8ee';
+    poly(0,0,b.r,4,0); ctx.fill();
+    ctx.strokeStyle = C.bolt; ctx.lineWidth=2;
+    poly(0,0,b.r+3.5,4,Math.PI/4); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawShots(){
+  for(var i=0;i<shots.length;i++){
+    var s = shots[i];
+    if(s.shock){
+      var a = clamp(s.life/0.34,0,1);
+      ctx.globalAlpha = a*0.8;
+      ctx.strokeStyle = '#9dfbff';
+      ctx.lineWidth = 6*a;
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    var col = s.kind==='bolt' ? C.bolt : C.shot;
+    blob(s.x,s.y, s.r*3.4, s.kind==='bolt'?'rgba(255,93,177,0.45)':'rgba(157,251,255,0.42)');
+    ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(s.a);
+    ctx.fillStyle = '#ffffff';
+    if(s.kind==='bolt'){ poly(0,0,s.r,4,0); ctx.fill(); }
+    else { ctx.fillRect(-s.r*0.6,-s.r*0.6,s.r*1.2,s.r*1.2); }
+    ctx.restore();
+  }
+}
+
+function drawEnemies(){
+  for(var i=0;i<enemies.length;i++){
+    var e = enemies[i];
+    if(e.spawnA>0){
+      var t = 1-clamp(e.spawnA/0.6,0,1);
+      ctx.globalAlpha = 0.35+0.4*Math.sin(G.t*30);
+      ctx.strokeStyle = e.col; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(e.x,e.y,e.r*(0.5+t*0.9),0,TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+      blob(e.x,e.y,e.r*2.2,'rgba(255,80,80,0.16)');
+      continue;
+    }
+    var ang = Math.atan2(P.y-e.y, P.x-e.x);
+    var flash = e.flash>0;
+    var body = flash ? '#ffffff' : e.col;
+    blob(e.x,e.y, e.r*3.0, hexA(e.col, 0.34));
+
+    ctx.save(); ctx.translate(e.x,e.y);
+    ctx.lineWidth = 2.5;
+    if(e.type==='drone'){
+      ctx.rotate(ang);
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.moveTo(e.r,0); ctx.lineTo(-e.r*0.72, e.r*0.78); ctx.lineTo(-e.r*0.30,0); ctx.lineTo(-e.r*0.72,-e.r*0.78);
+      ctx.closePath(); ctx.fill();
+    } else if(e.type==='spinner'){
+      ctx.rotate(e.t*7);
+      ctx.fillStyle = body;
+      poly(0,0,e.r,3,0); ctx.fill();
+      ctx.strokeStyle = body; ctx.globalAlpha=0.6;
+      poly(0,0,e.r*1.5,3,Math.PI); ctx.stroke(); ctx.globalAlpha=1;
+    } else if(e.type==='shooter'){
+      ctx.rotate(ang);
+      ctx.strokeStyle = body; ctx.fillStyle = hexA(e.col,0.30);
+      poly(0,0,e.r,6,0); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash?'#fff':'#ffd8ee';
+      ctx.beginPath(); ctx.arc(e.r*0.42,0,e.r*0.30,0,TAU); ctx.fill();
+    } else if(e.type==='splitter'){
+      ctx.rotate(e.t*1.6);
+      ctx.strokeStyle = body; ctx.fillStyle = hexA(e.col,0.34);
+      poly(0,0,e.r,4,0); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = body; ctx.globalAlpha=0.7;
+      poly(0,0,e.r*0.52,4,Math.PI/4); ctx.stroke(); ctx.globalAlpha=1;
+    } else if(e.type==='lancer'){
+      ctx.rotate(ang);
+      ctx.strokeStyle = body; ctx.fillStyle = hexA(e.col,0.26);
+      ctx.beginPath();
+      ctx.moveTo(e.r,0); ctx.lineTo(-e.r*0.5, e.r*0.85); ctx.lineTo(-e.r*0.9,0); ctx.lineTo(-e.r*0.5,-e.r*0.85);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash?'#fff':'#eef3ff';
+      ctx.beginPath(); ctx.arc(e.r*0.25,0,e.r*0.24,0,TAU); ctx.fill();
+    } else if(e.type==='brute'){
+      ctx.rotate(e.t*0.7);
+      ctx.strokeStyle = body; ctx.lineWidth=4; ctx.fillStyle = hexA(e.col,0.28);
+      poly(0,0,e.r,8,0); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = body;
+      poly(0,0,e.r*0.36,8,0); ctx.fill();
+    } else if(e.type==='boss'){
+      ctx.rotate(e.t*0.5);
+      ctx.strokeStyle = body; ctx.lineWidth=5; ctx.fillStyle = hexA(e.col,0.24);
+      poly(0,0,e.r,6,0); ctx.fill(); ctx.stroke();
+      ctx.rotate(-e.t*1.3);
+      ctx.strokeStyle = '#ffd8ee'; ctx.lineWidth=3; ctx.globalAlpha=0.85;
+      poly(0,0,e.r*0.60,3,0); ctx.stroke();
+      ctx.globalAlpha=1;
+      ctx.fillStyle = flash?'#fff':'#ffe0ec';
+      ctx.beginPath(); ctx.arc(0,0,e.r*0.20,0,TAU); ctx.fill();
+    }
+    ctx.restore();
+
+    if(e.type==='lancer' && e.charge>0){
+      var ch = 1 - e.charge/LANCE_TELL;
+      ctx.globalAlpha = 0.25 + ch*0.65;
+      ctx.strokeStyle = ch>0.75 ? '#ffffff' : C.lancer;
+      ctx.lineWidth = 1 + ch*2.5;
+      ctx.setLineDash([14,10]); ctx.lineDashOffset = -G.t*90;
+      ctx.beginPath();
+      ctx.moveTo(e.x + e.aimX*e.r, e.y + e.aimY*e.r);
+      ctx.lineTo(e.x + e.aimX*1400, e.y + e.aimY*1400);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    if(e.maxHp>2 && e.type!=='boss'){
+      var w = e.r*1.8, hp = clamp(e.hp/e.maxHp,0,1);
+      ctx.globalAlpha=0.85;
+      ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(e.x-w/2, e.y-e.r-11, w, 4);
+      ctx.fillStyle=e.col; ctx.fillRect(e.x-w/2, e.y-e.r-11, w*hp, 4);
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+function hexA(hex,a){
+  var h = hex.replace('#','');
+  var r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+  return 'rgba('+r+','+g+','+b+','+a+')';
+}
+
+function drawZaps(){
+  for(var i=0;i<zaps.length;i++){
+    var z = zaps[i], a = z.life/z.max;
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = '#bff6ff'; ctx.lineWidth = 3*a;
+    ctx.beginPath();
+    var segs=6;
+    ctx.moveTo(z.x1,z.y1);
+    for(var s=1;s<segs;s++){
+      var tt=s/segs;
+      ctx.lineTo(lerp(z.x1,z.x2,tt)+rnd(-14,14), lerp(z.y1,z.y2,tt)+rnd(-14,14));
+    }
+    ctx.lineTo(z.x2,z.y2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPlayer(){
+  if(G.mode==='over') return;
+  var alive = P.hp>0;
+  var magHeld = (IN.down||IN.kMag) && (G.mode==='play'||G.mode==='intro');
+
+  // magnet field
+  if(magHeld && alive){
+    var pf = 0.10 + 0.06*Math.sin(G.t*9);
+    ctx.globalAlpha = 1;
+    var fg = ctx.createRadialGradient(P.x,P.y,P.magR*0.30,P.x,P.y,P.magR);
+    fg.addColorStop(0, hexA(C.player,0));
+    fg.addColorStop(0.75, hexA(C.player, pf*0.6));
+    fg.addColorStop(1, hexA(C.player,0));
+    ctx.fillStyle=fg;
+    ctx.beginPath(); ctx.arc(P.x,P.y,P.magR,0,TAU); ctx.fill();
+    ctx.strokeStyle=hexA(C.player, 0.22+0.10*Math.sin(G.t*9));
+    ctx.lineWidth=2;
+    ctx.setLineDash([10,12]);
+    ctx.lineDashOffset = -G.t*40;
+    ctx.beginPath(); ctx.arc(P.x,P.y,P.magR,0,TAU); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // orbit items
+  for(var i=0;i<orbit.length;i++){
+    var o = orbit[i];
+    if(o.kind==='bolt'){
+      blob(o.x,o.y,22,'rgba(255,93,177,0.42)');
+      ctx.save(); ctx.translate(o.x,o.y); ctx.rotate(o.spinA||0);
+      ctx.fillStyle='#ffd8ee'; poly(0,0,8,4,0); ctx.fill();
+      ctx.restore();
+    } else {
+      blob(o.x,o.y,o.r*2.6,'rgba(255,190,70,0.28)');
+      ctx.save(); ctx.translate(o.x,o.y); ctx.rotate(o.spinA||0);
+      ctx.fillStyle=C.scrap; ctx.fillRect(-o.r*0.62,-o.r*0.62,o.r*1.24,o.r*1.24);
+      ctx.restore();
+    }
+  }
+  // orbit ring guide
+  if(orbit.length>0 && alive){
+    ctx.strokeStyle=hexA(C.player,0.16); ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(P.x,P.y,P.orbR,0,TAU); ctx.stroke();
+  }
+
+  if(!alive) return;
+
+  var blink = P.inv>0 && (Math.floor(G.t*22)%2===0);
+  var pr = P.r + Math.sin(G.t*5)*0.8;
+  blob(P.x,P.y, pr*5.2, hexA(C.player, blink?0.20:0.42));
+  ctx.globalAlpha = blink?0.45:1;
+  ctx.fillStyle = C.player;
+  poly(P.x,P.y,pr*1.5,P.sides,-P.orbBase*0.8); ctx.fill();
+  ctx.fillStyle = C.playerCore;
+  ctx.beginPath(); ctx.arc(P.x,P.y,pr*0.62,0,TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // capacity arc
+  if(orbit.length>0){
+    var frac = orbit.length/P.cap;
+    ctx.strokeStyle = frac>=1 ? C.scrap : hexA(C.player,0.75);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(P.x,P.y,pr*2.2,-Math.PI/2, -Math.PI/2 + TAU*Math.min(1,frac));
+    ctx.stroke();
+  }
+}
+
+function drawParticles(){
+  for(var i=0;i<parts.length;i++){
+    var p = parts[i], a = clamp(p.life/p.max,0,1);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.col;
+    ctx.fillRect(p.x-p.r*a, p.y-p.r*a, p.r*2*a, p.r*2*a);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPops(){
+  for(var i=0;i<pops.length;i++){
+    var t = pops[i], a = clamp(t.life/t.max,0,1);
+    text(t.txt, t.x, t.y, t.size, t.col, 'center', 800, a*0.95, 0.5);
+  }
+}
+
+/* --------------------------------- HUD --------------------------------- */
+function drawHUD(){
+  // lives
+  for(var i=0;i<P.maxHp;i++){
+    var x = 38+i*28, y = 40;
+    var on = i<P.hp;
+    ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4);
+    if(on){
+      ctx.fillStyle = P.hp<=1 ? '#ff5f7a' : C.player;
+      ctx.fillRect(-7.5,-7.5,15,15);
+    } else {
+      ctx.strokeStyle='rgba(234,242,255,0.26)'; ctx.lineWidth=2;
+      ctx.strokeRect(-7.5,-7.5,15,15);
+    }
+    ctx.restore();
+  }
+
+  // wave + remaining
+  if(G.wave>0){
+    text('WAVE '+G.wave, VW/2, 40, 21, C.text, 'center', 800, 0.92, 3);
+    var remaining = enemies.length + G.spawnQ.length;
+    if(remaining>0) text(remaining+' LEFT', VW/2, 66, 11, C.dim, 'center', 700, 0.75, 2.5);
+  }
+
+  // score
+  text(String(G.score), VW-38, 40, 28, C.text, 'right', 800, 1, 1);
+  var best = parseInt(store('mgn.best')||'0',10);
+  text('BEST '+Math.max(best,G.score), VW-38, 66, 11, C.dim, 'right', 700, 0.75, 2);
+
+  // boss bar, clear of the wave label above it
+  if(G.bossRef && !G.bossRef.dead){
+    var b = G.bossRef, w2 = 460, x2 = VW/2-w2/2, y2 = 100;
+    text('GUARDIAN', VW/2, y2-14, 11, C.boss, 'center', 800, 0.95, 4);
+    ctx.fillStyle='rgba(0,0,0,0.45)'; roundRect(x2,y2,w2,9,5); ctx.fill();
+    ctx.fillStyle=C.boss; roundRect(x2,y2,Math.max(4,w2*clamp(b.hp/b.maxHp,0,1)),9,5); ctx.fill();
+  }
+
+  /* Wave announcement. The state for this was already being computed and
+     decayed every frame but never drawn - it just needed a home. */
+  if(G.waveBanner > 0 && G.waveBannerTxt && (G.mode==='play' || G.mode==='intro')){
+    var wb = G.waveBanner;
+    var alpha = clamp(Math.min((2.0-wb)/0.22, wb/0.55), 0, 1);
+    var rise = (1 - clamp((2.0-wb)/0.45, 0, 1)) * 16;
+    text(G.waveBannerTxt, VW/2, 214 - rise, 38, C.text, 'center', 900, alpha*0.9, 11);
+  }
+
+  // combo
+  if(G.combo>1){
+    var ca = clamp(G.comboT/2.6,0,1);
+    var sz = 34 + Math.min(G.combo,12)*1.6;
+    text('x'+G.combo, VW/2, 134, sz, C.scrap, 'center', 900, 0.35+ca*0.65, 1);
+    text('COMBO', VW/2, 134+sz*0.64, 11, C.scrap, 'center', 700, ca*0.55, 4);
+  }
+
+  /* XP runs full-bleed along the very bottom edge. It used to be an inset
+     rounded bar that passed underneath the mute and pause buttons. */
+  var xpH = 5, xpY = VH-xpH;
+  ctx.fillStyle='rgba(255,255,255,0.07)';
+  ctx.fillRect(0, xpY, VW, xpH);
+  ctx.fillStyle=C.player;
+  ctx.fillRect(0, xpY, Math.max(3, VW*clamp(G.xp/G.xpNeed,0,1)), xpH);
+
+  text('LV '+G.level, 38, VH-26, 12, C.dim, 'left', 700, 0.75, 2);
+  text(coreById(P.core).name, 38+78, VH-26, 11, C.player, 'left', 700, 0.5, 2.5);
+
+  drawBtn(BTN_MUTE, A.muted?'muted':'sound');
+  drawBtn(BTN_PAUSE, G.paused?'play':'pause');
+}
+
+function drawBtn(r, kind){
+  ctx.fillStyle='rgba(255,255,255,0.06)';
+  roundRect(r.x,r.y,r.w,r.h,10); ctx.fill();
+  ctx.strokeStyle='rgba(234,242,255,0.18)'; ctx.lineWidth=1.5;
+  roundRect(r.x,r.y,r.w,r.h,10); ctx.stroke();
+  var cx=r.x+r.w/2, cy=r.y+r.h/2;
+  ctx.strokeStyle='rgba(234,242,255,0.85)'; ctx.fillStyle='rgba(234,242,255,0.85)';
+  ctx.lineWidth=2;
+  if(kind==='pause'){ ctx.fillRect(cx-6,cy-8,4,16); ctx.fillRect(cx+2,cy-8,4,16); }
+  else if(kind==='play'){ ctx.beginPath(); ctx.moveTo(cx-5,cy-8); ctx.lineTo(cx+8,cy); ctx.lineTo(cx-5,cy+8); ctx.closePath(); ctx.fill(); }
+  else {
+    ctx.beginPath(); ctx.moveTo(cx-9,cy-4); ctx.lineTo(cx-4,cy-4); ctx.lineTo(cx+1,cy-9);
+    ctx.lineTo(cx+1,cy+9); ctx.lineTo(cx-4,cy+4); ctx.lineTo(cx-9,cy+4); ctx.closePath(); ctx.fill();
+    if(kind==='muted'){
+      ctx.beginPath(); ctx.moveTo(cx+5,cy-5); ctx.lineTo(cx+12,cy+5); ctx.moveTo(cx+12,cy-5); ctx.lineTo(cx+5,cy+5); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(cx+3,cy,7,-0.9,0.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx+3,cy,12,-0.9,0.9); ctx.stroke();
+    }
+  }
+}
+
+function drawCursor(){
+  if(IN.isTouch || !IN.has) return;
+  var a = 0.55;
+  ctx.strokeStyle=hexA(C.player,a); ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(IN.x,IN.y,9,0,TAU); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(IN.x-15,IN.y); ctx.lineTo(IN.x-11,IN.y);
+  ctx.moveTo(IN.x+11,IN.y); ctx.lineTo(IN.x+15,IN.y);
+  ctx.moveTo(IN.x,IN.y-15); ctx.lineTo(IN.x,IN.y-11);
+  ctx.moveTo(IN.x,IN.y+11); ctx.lineTo(IN.x,IN.y+15);
+  ctx.stroke();
+}
+
+/* ------------------------------ onboarding ----------------------------- */
+function drawIntro(){
+  var touch = IN.isTouch;
+  var line1, line2;
+  if(G.introStep===0){ line1 = touch?'DRAG to move':'MOVE your mouse to fly'; line2 = 'The core follows you.'; }
+  else if(G.introStep===1){ line1 = touch?'HOLD to pull':'HOLD the button to pull'; line2 = 'Drag scrap into orbit around you.'; }
+  else if(G.introStep===2){ line1 = 'RELEASE to blast'; line2 = 'Everything in orbit fires outward.'; }
+  else { line1 = 'Catch their shots. Send them back.'; line2 = 'Survive the waves.'; }
+
+  var a = clamp(G.introT*3,0,1) * (G.introStep===3 ? clamp(1.4-G.introT,0,1) : 1);
+  ctx.globalAlpha = 1;
+  text('MAGNETAR', VW/2, 132, 44, '#7cf3ff', 'center', 900, 0.16+0.05*Math.sin(G.t*2), 12);
+  text(line1, VW/2, VH-118, 30, C.text, 'center', 800, a, 2);
+  text(line2, VW/2, VH-84, 15, C.dim, 'center', 600, a*0.9, 1);
+}
+
+/* ------------------------------- level up ------------------------------ */
+function drawLevelUp(){
+  G.cardT = (G.cardT||0) + 0.016;
+  var a = clamp(G.cardT*5,0,1);
+  ctx.fillStyle='rgba(3,5,14,'+(0.82*a)+')';
+  ctx.fillRect(0,0,VW,VH);
+
+  var hi = RARITY[G.bestRarity||0];
+  text('LEVEL '+G.level, VW/2, 92, 17, (G.bestRarity>=EPIC)?hi.col:C.scrap, 'center', 800, a, 6);
+  text('CHOOSE AN UPGRADE', VW/2, 132, 34, C.text, 'center', 900, a, 5);
+
+  for(var i=0;i<G.cards.length;i++){
+    var r = cardRect(i), u = G.cards[i];
+    var hov = IN.has && inRect(IN.x,IN.y,r);
+    var lift = hov?8:0;
+    var ca = clamp((G.cardT-i*0.06)*6,0,1);
+    var top = r.y-lift;
+    ctx.globalAlpha = ca;
+
+    var rar = RARITY[u.r];
+
+    // Epics carry a soft outer bloom so the good card reads across the room.
+    if(u.r >= EPIC){
+      var puls = 0.5 + 0.5*Math.sin(G.uiT*2.6 + i);
+      ctx.globalAlpha = ca*(0.10 + 0.12*puls);
+      ctx.strokeStyle = rar.col; ctx.lineWidth = 12;
+      roundRect(r.x-3, top-3, r.w+6, r.h+6, 21); ctx.stroke();
+      ctx.globalAlpha = ca;
+    }
+
+    ctx.fillStyle = hov ? hexA(rar.col,0.15) : 'rgba(255,255,255,0.042)';
+    roundRect(r.x, top, r.w, r.h, 18); ctx.fill();
+    ctx.strokeStyle = hov ? rar.col : hexA(rar.col, u.r?0.55:0.32);
+    ctx.lineWidth = hov?3:(u.r?2:1.5);
+    roundRect(r.x, top, r.w, r.h, 18); ctx.stroke();
+
+    var cx = r.x+r.w/2;
+
+    // header row
+    text(String(i+1), r.x+PAD, top+34, 14, C.dim, 'left', 700, ca*0.8, 1);
+    text(rar.name, r.x+r.w-PAD, top+34, 10, rar.col, 'right', 800, ca*0.95, 3.5);
+
+    // icon
+    var cy = top+142;
+    ctx.globalCompositeOperation='lighter';
+    blob(cx,cy,82, hexA(rar.col, rar.glow));
+    ctx.globalCompositeOperation='source-over';
+    ctx.strokeStyle = rar.col; ctx.lineWidth=3;
+    poly(cx,cy,32, u.sides, G.uiT*(0.8+i*0.3)); ctx.stroke();
+    ctx.fillStyle = rar.col; ctx.globalAlpha = ca*0.9;
+    ctx.beginPath(); ctx.arc(cx,cy,8,0,TAU); ctx.fill();
+    ctx.globalAlpha = ca;
+
+    hr(r.x+PAD, r.x+r.w-PAD, top+212, ca*0.10);
+
+    text(u.name, cx, top+250, 21, C.text, 'center', 900, ca, 1.5);
+    wrapText(u.desc, cx, top+288, 15, C.dim, r.w-2*PAD-16, 21);
+
+    // stack pips
+    var taken = (G.taken&&G.taken[u.id])||0;
+    for(var p=0;p<u.max;p++){
+      var px = cx - (u.max-1)*8 + p*16;
+      ctx.fillStyle = p<taken ? rar.col : 'rgba(234,242,255,0.18)';
+      ctx.beginPath(); ctx.arc(px, top+r.h-42, 4, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  text(IN.isTouch?'Tap a card':'Click a card, or press 1 / 2 / 3',
+       VW/2, 616, 14, C.dim, 'center', 600, a*0.75, 1.5);
+}
+
+function wrapText(str,cx,y,size,col,maxW,lh,align,alpha){
+  ctx.font = '600 '+size+'px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';
+  var words = str.split(' '), line='', lines=[];
+  for(var i=0;i<words.length;i++){
+    var test = line?line+' '+words[i]:words[i];
+    if(ctx.measureText(test).width > maxW && line){ lines.push(line); line=words[i]; }
+    else line = test;
+  }
+  if(line) lines.push(line);
+  for(var j=0;j<lines.length;j++){
+    text(lines[j], cx, y+j*lh, size, col, align||'center', 600, alpha===undefined?0.9:alpha, 0);
+  }
+  return lines.length;
+}
+
+/* ------------------------------ game over ------------------------------ */
+/* The panel sits higher when a banner has space reserved beneath it. */
+function overY(){ return BANNER.reserved ? 48 : 100; }
+var OVER_H = 512;
+
+function overBtns(){
+  var y = overY() + 410;
+  return {
+    play:  {x:VW/2-196, y:y, w:250, h:54},
+    cores: {x:VW/2+66,  y:y, w:130, h:54}
+  };
+}
+
+function drawGameOver(){
+  var t = G.overT||0;
+  var a = clamp(t*2.5,0,1);
+  ctx.fillStyle='rgba(3,5,14,'+(0.84*a)+')';
+  ctx.fillRect(0,0,VW,VH);
+
+  var by = overY(), bw = 580, bx = VW/2-bw/2, bh = OVER_H;
+  ctx.globalAlpha = a;
+  ctx.fillStyle='rgba(255,255,255,0.042)';
+  roundRect(bx,by,bw,bh,22); ctx.fill();
+  ctx.strokeStyle=hexA(C.player,0.30); ctx.lineWidth=2;
+  roundRect(bx,by,bw,bh,22); ctx.stroke();
+
+  var inset = bx+PAD+10, inR = bx+bw-PAD-10;
+
+  // identity
+  text('CORE LOST', VW/2, by+54, 36, '#ff5f7a', 'center', 900, 1, 5);
+  var bw2 = parseInt(store('mgn.bestwave')||'0',10);
+  text('RANK  '+rankFor(bw2), VW/2, by+86, 11, C.dim, 'center', 700, 0.62, 4);
+
+  // the number of the run
+  text(String(G.score), VW/2, by+152, 66, C.text, 'center', 900, 1, 2);
+  if(G.newBest){
+    text('NEW BEST SCORE', VW/2, by+198, 12, C.scrap, 'center', 800, 0.65+0.35*Math.sin(G.uiT*6), 4);
+  } else {
+    text('SCORE', VW/2, by+198, 11, C.dim, 'center', 700, 0.7, 5);
+  }
+
+  hr(inset, inR, by+230, a*0.10);
+
+  // run detail
+  var best = parseInt(store('mgn.best')||'0',10);
+  stat(VW/2-168, by+268, 'WAVE', String(G.wave));
+  stat(VW/2,     by+268, 'BEST COMBO', 'x'+G.bestCombo);
+  stat(VW/2+168, by+268, 'BEST', String(Math.max(best, G.score)));
+
+  hr(inset, inR, by+326, a*0.10);
+
+  // The Flux payout counts up, so the reward for the run you just finished is
+  // the thing that animates rather than a static number you skim past.
+  var earned = G.fluxEarned||0;
+  var shown = Math.round(earned * clamp((t-0.35)/0.8, 0, 1));
+  text('+'+shown+' FLUX', VW/2, by+366, 29, C.scrap, 'center', 900, 1, 2);
+  text(getFlux()+' BANKED', VW/2, by+392, 11, C.dim, 'center', 700, 0.7, 4);
+
+  // actions
+  var b = overBtns(), pulse = 0.65+0.35*Math.sin(G.uiT*4);
+  var hovP = IN.has && inRect(IN.x,IN.y,b.play);
+  ctx.fillStyle=hexA(C.player, hovP?0.26:(0.13+0.05*pulse));
+  roundRect(b.play.x,b.play.y,b.play.w,b.play.h,14); ctx.fill();
+  ctx.strokeStyle=hexA(C.player, hovP?1:pulse); ctx.lineWidth=2;
+  roundRect(b.play.x,b.play.y,b.play.w,b.play.h,14); ctx.stroke();
+  text('PLAY AGAIN', b.play.x+b.play.w/2, b.play.y+28, 20, C.text, 'center', 900, 1, 3);
+
+  var hovC = IN.has && inRect(IN.x,IN.y,b.cores);
+  ctx.fillStyle = hovC ? hexA(C.scrap,0.16) : 'rgba(255,255,255,0.05)';
+  roundRect(b.cores.x,b.cores.y,b.cores.w,b.cores.h,14); ctx.fill();
+  ctx.strokeStyle = hovC ? C.scrap : 'rgba(234,242,255,0.26)'; ctx.lineWidth=2;
+  roundRect(b.cores.x,b.cores.y,b.cores.w,b.cores.h,14); ctx.stroke();
+  text('CORES', b.cores.x+b.cores.w/2, b.cores.y+28, 15, hovC?C.scrap:C.text, 'center', 800, 1, 2.5);
+
+  // With an ad on screen, "click anywhere" would turn the whole page into a
+  // button sitting next to it - the button becomes the only pointer target.
+  var hint = BANNER.reserved
+    ? (IN.isTouch ? 'Tap PLAY AGAIN to retry' : 'Press PLAY AGAIN or Enter to retry')
+    : (IN.isTouch ? 'Tap anywhere to retry'   : 'Click anywhere or press Enter to retry');
+  text(hint, VW/2, by+bh-26, 12, C.dim, 'center', 600, 0.55*a, 1.5);
+  ctx.globalAlpha = 1;
+}
+
+var RANKS = [[20,'EVENT HORIZON'],[15,'SINGULARITY'],[10,'MAGNETAR'],[5,'FIELD TECH'],[1,'SCRAP RAT']];
+function rankFor(w){
+  for(var i=0;i<RANKS.length;i++) if(w>=RANKS[i][0]) return RANKS[i][1];
+  return 'SCRAP RAT';
+}
+function stat(x,y,label,val){
+  text(val, x, y, 26, C.text, 'center', 900, 1, 1);
+  text(label, x, y+26, 11, C.dim, 'center', 700, 0.75, 2.5);
+}
+
+/* -------------------------------- cores -------------------------------- */
+/* The core menu is a full screen with no spare band, so a banner has to be
+   made room for rather than dropped in. Everything tightens by about 17% and
+   only while a banner is actually reserved - with no ad (no SDK, no fill, the
+   Artifact build) the roomy layout is what you get. */
+function coresLayout(){
+  return BANNER.reserved
+    ? { title:46, sub:78, sync:100,
+        y0:120, h:186, step:202,
+        glyphY:64, glyphR:22, nameY:38,
+        tagY:62, tagSize:12, tagLh:16,
+        divY:110, statY:134, statLh:18, statSize:12,
+        launch:{x:VW/2-130, y:524, w:260, h:46} }
+    : { title:62, sub:98, sync:124,
+        y0:152, h:225, step:251,
+        glyphY:76, glyphR:25, nameY:44,
+        tagY:74, tagSize:12.5, tagLh:18,
+        divY:134, statY:160, statLh:22, statSize:12.5,
+        launch:{x:VW/2-130, y:650, w:260, h:52} };
+}
+function coreCardRect(i){
+  var L = coresLayout(), col = i%3, row = Math.floor(i/3);
+  return {x:66 + col*392, y:L.y0 + row*L.step, w:364, h:L.h};
+}
+function launchRect(){ return coresLayout().launch; }
+
+function coreGlyph(c, cx, cy, r, alpha){
+  ctx.globalCompositeOperation='lighter';
+  blob(cx, cy, r*2.6, hexA(c.col, 0.30*alpha));
+  ctx.globalCompositeOperation='source-over';
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = c.col;
+  poly(cx, cy, r, c.sides, G.uiT*0.5); ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(cx, cy, r*0.30, 0, TAU); ctx.fill();
+  ctx.strokeStyle = hexA(c.col, 0.45);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r*1.55, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function openCores(){
+  G.mode = 'cores';
+  G.coreT = 0;
+  A.sUi();
+}
+
+function drawCores(){
+  G.coreT = (G.coreT||0) + 0.016;
+  var a = clamp(G.coreT*5,0,1);
+  var L = coresLayout();
+  ctx.fillStyle='rgba(3,5,14,0.94)';
+  ctx.fillRect(0,0,VW,VH);
+  ctx.globalAlpha = a;
+
+  text('CORES', 66, L.title, 34, C.text, 'left', 900, 1, 7);
+  text('Every run banks Flux. Spend it on a different way to open the next one.',
+       66, L.sub, 13, C.dim, 'left', 600, 0.75, 0.5);
+
+  var flux = getFlux();
+  text(String(flux), VW-66, L.title-4, 34, C.scrap, 'right', 900, 1, 1);
+  text('FLUX BANKED', VW-66, L.title+26, 10, C.dim, 'right', 700, 0.75, 4);
+
+  // Progression is only worth chasing if the player believes it will still be
+  // there tomorrow, so say plainly where it is being kept.
+  var synced = !!(window.CG && window.CG.cloud);
+  var msg = synced ? 'SYNCED TO YOUR CRAZYGAMES ACCOUNT' : 'SAVED ON THIS DEVICE';
+  var col = synced ? '#6effc0' : C.dim;
+  ctx.globalAlpha = a*0.8;
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.arc(70, L.sync, 3.5, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  text(msg, 82, L.sync, 10, col, 'left', 700, a*0.65, 2.5);
+
+  var sel = selectedCore();
+  for(var i=0;i<CORES.length;i++){
+    var c = CORES[i], r = coreCardRect(i);
+    var own = owns(c.id), eq = (c.id===sel), afford = flux >= c.cost;
+    var hov = IN.has && inRect(IN.x,IN.y,r);
+    var live = own || afford;          // dim only what you cannot act on yet
+    var ca = a * (live ? 1 : 0.5);
+
+    ctx.fillStyle = eq ? hexA(c.col,0.11) : (hov && live ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.032)');
+    roundRect(r.x,r.y,r.w,r.h,18); ctx.fill();
+    ctx.strokeStyle = eq ? c.col : (hov && live ? hexA(c.col,0.75) : 'rgba(234,242,255,0.14)');
+    ctx.lineWidth = eq ? 2.5 : 1.5;
+    roundRect(r.x,r.y,r.w,r.h,18); ctx.stroke();
+
+    coreGlyph(c, r.x+64, r.y+L.glyphY, L.glyphR, ca);
+
+    var tx = r.x+118;
+    text(c.name, tx, r.y+L.nameY, 20, own?C.text:'rgba(234,242,255,0.8)', 'left', 900, ca, 1.5);
+    wrapText(c.tag, tx, r.y+L.tagY, L.tagSize, C.dim, r.w-118-PAD, L.tagLh, 'left', ca*0.8);
+
+    hr(r.x+PAD, r.x+r.w-PAD, r.y+L.divY, ca*0.09);
+
+    for(var k=0;k<c.stats.length;k++){
+      var sy = r.y+L.statY+k*L.statLh;
+      ctx.globalAlpha = ca*0.9;
+      ctx.fillStyle = c.col;
+      ctx.beginPath(); ctx.arc(r.x+PAD+2, sy, 2.5, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      text(c.stats[k], r.x+PAD+14, sy, L.statSize, C.dim, 'left', 600, ca*0.85, 0.3);
+    }
+
+    // Share a baseline with the last stat line so the row reads as one.
+    var bxr = r.x+r.w-PAD, byr = r.y+L.statY+(c.stats.length-1)*L.statLh;
+    if(eq)        text('EQUIPPED', bxr, byr, 13, c.col, 'right', 900, a, 3);
+    else if(own)  text('SELECT',   bxr, byr, 13, hov?C.text:C.dim, 'right', 800, a, 3);
+    else          text(c.cost+' FLUX', bxr, byr, 13, afford?C.scrap:'rgba(234,242,255,0.32)', 'right', 800, a, 2.5);
+  }
+
+  var LB = L.launch;
+  var hovL = IN.has && inRect(IN.x,IN.y,LB);
+  var pulse = 0.6+0.4*Math.sin(G.uiT*4);
+  ctx.fillStyle = hexA(C.player, hovL?0.24:0.13);
+  roundRect(LB.x,LB.y,LB.w,LB.h,14); ctx.fill();
+  ctx.strokeStyle = hexA(C.player, hovL?1:pulse); ctx.lineWidth=2;
+  roundRect(LB.x,LB.y,LB.w,LB.h,14); ctx.stroke();
+  text('LAUNCH', VW/2, LB.y+LB.h/2, 19, C.text, 'center', 900, 1, 4);
+
+  drawBtn(BTN_MUTE, A.muted?'muted':'sound');
+  ctx.globalAlpha = 1;
+}
+
+
+/* ------------------------------- banner -------------------------------- */
+/* Death screen only. The ad requirements forbid banners during gameplay and
+   ask that they sit clear of the game's own buttons, so this lives in the
+   empty band below the game-over panel and never appears anywhere else.
+   Space is reserved as soon as we know a banner *could* fill, so a failed
+   fill does not make the panel jump. */
+var BANNER = {
+  ID:'mgn-banner',
+  wrap:null, el:null,
+  shown:false, reserved:false, requesting:false, filled:false, screen:'', token:0,
+  w:0, h:0, lastReq:-1e9, fails:0,
+
+  init:function(){
+    this.wrap = document.getElementById('mgn-banner-wrap');
+    this.el = document.getElementById(this.ID);
+  },
+
+  /* Each screen leaves the band in a different place. */
+  bandTop:function(){ return (G.mode === 'cores') ? 600 : 582; },
+
+  /* Largest supported size that fits under the panel, or null. */
+  pick:function(){
+    var labelH = 14, pad = 10;
+    var top = offY + this.bandTop()*scale;
+    var avail = cssH - top - pad;
+    if(cssW >= 768 && avail >= 90 + labelH) return [728,90];
+    if(cssW >= 500 && avail >= 60 + labelH) return [468,60];
+    if(cssW >= 340 && avail >= 50 + labelH) return [320,50];
+    return null;
+  },
+
+  available:function(){
+    return !!(window.CG && window.CG.ready && window.CG.bannersOk &&
+              window.CG.adsOk && this.fails < 3 && this.pick());
+  },
+
+  place:function(size){
+    if(!this.wrap) return;
+    var labelH = 14;
+    var top = offY + this.bandTop()*scale;
+    var room = cssH - top;
+    this.el.style.width = size[0]+'px';
+    this.el.style.height = size[1]+'px';
+    this.wrap.style.left = Math.round((cssW - size[0])/2)+'px';
+    this.wrap.style.top = Math.round(top + Math.max(0,(room - size[1] - labelH)/2))+'px';
+  },
+
+  /* Reserve the space immediately, but only reveal the labelled container once
+     an ad has actually been filled into it - otherwise the player sees an
+     ADVERTISEMENT label over an empty box while the request is in flight. */
+  show:function(){
+    if(!this.wrap) return;
+    var size = this.pick();
+    if(!size || !this.available()){ this.hide(); return; }
+    this.reserved = true;
+    this.screen = G.mode;
+    this.place(size);
+
+    if(this.requesting) return;                     // one in flight; wait for it
+    var now = performance.now(), self = this;
+    var sameSize = (this.w === size[0] && this.h === size[1]);
+    if(sameSize && this.filled){                    // already filled at this size
+      this.wrap.className = 'on'; this.shown = true; return;
+    }
+    // The SDK enforces a refresh floor; staying well clear of it avoids
+    // burning requests on bannerCooldown errors. Stay blank until it lifts.
+    if(sameSize && now - this.lastReq < 61000) return;
+
+    this.w = size[0]; this.h = size[1];
+    this.filled = false;
+    this.lastReq = now;
+    this.requesting = true;
+    // A hide() between request and response invalidates this token, so a
+    // response for the old screen can never reveal an emptied container.
+    var tok = ++this.token;
+    try{
+      window.CG.sdk.banner.requestBanner({ id:this.ID, width:size[0], height:size[1] })
+        .then(function(){
+          if(self.token !== tok) return;
+          self.requesting = false; self.fails = 0; self.filled = true;
+          if(self.reserved && self.wrap){ self.wrap.className = 'on'; self.shown = true; }
+        })
+        .catch(function(e){
+          if(self.token !== tok) return;   // belongs to a superseded request
+          self.requesting = false; self.fail(e && e.code);
+        });
+    }catch(e){ this.requesting = false; this.fail('threw'); }
+  },
+
+  /* No fill: collapse the container rather than leave an empty rectangle.
+     The reserved space stays, so the panel does not jump. */
+  fail:function(code){
+    if(code !== 'bannerCooldown') this.fails++;
+    this.shown = false;
+    this.filled = false;
+    if(this.wrap) this.wrap.className = '';
+  },
+
+  hide:function(){
+    this.shown = false;
+    this.reserved = false;
+    this.filled = false;
+    this.screen = '';
+    this.token++;              // orphan any in-flight request
+    this.requesting = false;   // ...and never let a hung one wedge the next
+    if(this.wrap) this.wrap.className = '';
+    // The container is now empty, so the next death has to request again -
+    // otherwise the size check would short-circuit and show a labelled but
+    // blank box. If that request lands inside the SDK's refresh floor it
+    // returns bannerCooldown and fail() simply collapses the container.
+    this.w = 0; this.h = 0;
+    try{
+      if(window.CG.ready && window.CG.sdk.banner) window.CG.sdk.banner.clearBanner(this.ID);
+    }catch(e){}
+  }
+};
+
+function syncBanner(){
+  // Menus only - never during gameplay, and never behind a video ad (the SDK
+  // rejects that with videoAdPlaying anyway). The core menu is a shop, which
+  // the ad requirements list as an allowed placement.
+  var want = (G.mode === 'over' || G.mode === 'cores') && !G.adBusy;
+  if(want){
+    // The two screens park the band at different heights, so moving between
+    // them has to re-place rather than reuse the old slot.
+    if(BANNER.reserved && BANNER.screen !== G.mode) BANNER.hide();
+    // Retry while the space is reserved but nothing is on screen yet; show()
+    // rate-limits itself, so this cannot spam the SDK.
+    if(!BANNER.reserved || (!BANNER.shown && !BANNER.requesting)) BANNER.show();
+    else if(BANNER.shown) BANNER.place([BANNER.w, BANNER.h]);   // follow resizes
+  } else if(BANNER.reserved || BANNER.shown){
+    BANNER.hide();
+  }
+}
+
+/* -------------------------------- ads ---------------------------------- */
+function reviveBtns(){
+  var by = 186;
+  return {
+    yes:{x:VW/2-262, y:by+192, w:300, h:60},
+    no: {x:VW/2+42,  y:by+192, w:220, h:60}
+  };
+}
+
+function drawRevive(){
+  ctx.fillStyle='rgba(3,5,14,0.80)';
+  ctx.fillRect(0,0,VW,VH);
+
+  var by=186, bw=620, bx=VW/2-bw/2, bh=330;
+  ctx.fillStyle='rgba(255,255,255,0.048)';
+  roundRect(bx,by,bw,bh,22); ctx.fill();
+  ctx.strokeStyle=hexA(C.player,0.36); ctx.lineWidth=2;
+  roundRect(bx,by,bw,bh,22); ctx.stroke();
+
+  text('CORE LOST', VW/2, by+52, 26, '#ff5f7a', 'center', 900, 1, 5);
+  text('WAVE '+G.wave+'    '+G.score+' PTS', VW/2, by+82, 12, C.dim, 'center', 700, 0.7, 3);
+
+  hr(bx+PAD+10, bx+bw-PAD-10, by+108, 0.10);
+
+  text('Watch a short ad to get back in?', VW/2, by+142, 21, C.text, 'center', 800, 1, 0.5);
+  text('Optional \u2014 declining keeps every point and every Flux you earned.',
+       VW/2, by+168, 12, C.dim, 'center', 600, 0.7, 0.4);
+
+  var b = reviveBtns();
+  var hy = IN.has && inRect(IN.x,IN.y,b.yes);
+  ctx.fillStyle = hexA(C.player, hy?0.24:0.13);
+  roundRect(b.yes.x,b.yes.y,b.yes.w,b.yes.h,14); ctx.fill();
+  ctx.strokeStyle = hexA(C.player, hy?1:0.7); ctx.lineWidth=2;
+  roundRect(b.yes.x,b.yes.y,b.yes.w,b.yes.h,14); ctx.stroke();
+  text('WATCH AD TO REVIVE', b.yes.x+b.yes.w/2, b.yes.y+24, 17, C.text, 'center', 900, 1, 1.5);
+  text('2 lives, back where you fell   \u00b7   press Y',
+       b.yes.x+b.yes.w/2, b.yes.y+44, 10, C.dim, 'center', 700, 0.65, 0.6);
+
+  var hn = IN.has && inRect(IN.x,IN.y,b.no);
+  ctx.fillStyle = hn?'rgba(255,255,255,0.09)':'rgba(255,255,255,0.04)';
+  roundRect(b.no.x,b.no.y,b.no.w,b.no.h,14); ctx.fill();
+  ctx.strokeStyle = 'rgba(234,242,255,'+(hn?0.5:0.24)+')'; ctx.lineWidth=2;
+  roundRect(b.no.x,b.no.y,b.no.w,b.no.h,14); ctx.stroke();
+  text('NO THANKS', b.no.x+b.no.w/2, b.no.y+24, 17, C.text, 'center', 800, 1, 2);
+  text('press N', b.no.x+b.no.w/2, b.no.y+44, 10, C.dim, 'center', 700, 0.65, 1.5);
+
+  // The docs ask for a visible timer on a rewarded request.
+  var frac = clamp(G.reviveT/REVIVE_SECONDS, 0, 1);
+  var cx = VW/2, cy = by+bh-32;
+  ctx.strokeStyle='rgba(234,242,255,0.14)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(cx-16,cy,11,0,TAU); ctx.stroke();
+  ctx.strokeStyle=C.scrap; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(cx-16,cy,11,-Math.PI/2,-Math.PI/2+TAU*frac); ctx.stroke();
+  text(Math.ceil(Math.max(0,G.reviveT))+'s', cx+4, cy, 12, C.dim, 'left', 800, 0.7, 1);
+}
+
+function drawAdBusy(){
+  ctx.fillStyle='rgba(3,5,14,0.90)';
+  ctx.fillRect(0,0,VW,VH);
+  var cx=VW/2, cy=VH/2-8;
+  ctx.strokeStyle='rgba(234,242,255,0.14)'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.arc(cx,cy,26,0,TAU); ctx.stroke();
+  ctx.strokeStyle=C.player; ctx.lineWidth=4;
+  var sp = G.uiT*3.4;
+  ctx.beginPath(); ctx.arc(cx,cy,26, sp, sp+1.9); ctx.stroke();
+  text('LOADING AD', cx, cy+52, 15, C.dim, 'center', 800, 0.85, 4);
+}
+
+function drawPaused(){
+  ctx.fillStyle='rgba(3,5,14,0.72)';
+  ctx.fillRect(0,0,VW,VH);
+  text('PAUSED', VW/2, VH/2-14, 46, C.text, 'center', 900, 1, 8);
+  text(IN.isTouch?'Tap to resume':'Click or press P to resume', VW/2, VH/2+34, 15, C.dim, 'center', 600, 0.85, 1);
+}
+
+/* --------------------------------- UI ---------------------------------- */
+function handleUI(){
+  if(!IN.clicked) return;
+  var x = IN.clickX, y = IN.clickY;
+  IN.clicked = false;
+  if(G.adBusy){ IN.swallow = true; return; }   // the overlay blocks everything
+
+  if(inRect(x,y,BTN_MUTE)){ A.setMute(!A.muted); A.sUi(); IN.swallow=true; return; }
+  if(inRect(x,y,BTN_PAUSE)){ togglePause(); IN.swallow=true; return; }
+
+  if(G.mode==='levelup'){
+    for(var i=0;i<G.cards.length;i++){
+      if(inRect(x,y,cardRect(i))){ chooseUpgrade(i); IN.swallow=true; return; }
+    }
+    return;
+  }
+  if(G.mode==='revive'){
+    var rb = reviveBtns();
+    if(inRect(x,y,rb.yes)){ takeRevive(); IN.swallow=true; return; }
+    if(inRect(x,y,rb.no)){  finishRun();  IN.swallow=true; return; }
+    return;
+  }
+  if(G.mode==='over'){
+    var ob = overBtns();
+    if(inRect(x,y,ob.cores)){ openCores(); IN.swallow=true; return; }
+    if(inRect(x,y,ob.play)){
+      if((G.overT||0) > 0.35){ restart(); IN.swallow=true; }
+      return;
+    }
+    if(!BANNER.reserved && (G.overT||0) > 0.55){ restart(); IN.swallow=true; }
+    return;
+  }
+  if(G.mode==='cores'){
+    if(inRect(x,y,launchRect())){ restart(); IN.swallow=true; return; }
+    for(var ci=0; ci<CORES.length; ci++){
+      if(!inRect(x,y,coreCardRect(ci))) continue;
+      var c = CORES[ci];
+      if(owns(c.id)){
+        if(c.id!==selectedCore()){ equipCore(c.id); A.sUi(); }
+      } else if(buyCore(c.id)){
+        equipCore(c.id);
+        A.sLevel();
+        G.boughtT = G.uiT;
+      } else {
+        A.tone(150,0.20,'square',0.09,100);   // not enough Flux
+      }
+      IN.swallow=true;
+      return;
+    }
+    return;
+  }
+  if(G.paused){ G.paused=false; IN.swallow=true; A.sUi(); return; }
+}
+
+/* -------------------------------- loop --------------------------------- */
+var STEP = 1/120, acc = 0, last = 0;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  if(!last) last = now;
+  var rdt = (now-last)/1000; last = now;
+  if(rdt > 0.25) rdt = 0.25;
+
+  if(!G.adBusy) A.tick();
+  G.uiT += rdt;
+  if(G.mode==='over') G.overT = (G.overT||0) + rdt;
+
+  handleUI();
+  syncBanner();
+
+  var sim = (G.mode==='play' || G.mode==='intro' || G.mode==='levelup' || G.mode==='dying');
+  if(G.paused || G.adBusy) sim = false;
+
+  if(G.mode==='dying'){
+    G.deathT += rdt;
+    if(!G.postDeath && G.deathT > 1.15){ G.postDeath = true; afterDeath(); }
+  }
+  if(G.mode==='revive' && !G.adBusy){
+    G.reviveT -= rdt;
+    if(G.reviveT <= 0) finishRun();   // silence declines, it never nags
+  }
+  if(G.adMsgT > 0) G.adMsgT -= rdt;
+
+  if(sim){
+    if(G.hitStop > 0){
+      G.hitStop -= rdt;
+    } else {
+      G.timeScale = (G.mode==='levelup') ? 0.16 : (G.mode==='dying' ? 0.25 : 1);
+      acc += rdt * G.timeScale;
+      var steps = 0;
+      while(acc >= STEP && steps < 12){ update(STEP); acc -= STEP; steps++; }
+      if(acc > STEP*12) acc = 0;
+    }
+  } else {
+    acc = 0;
+    A.setHum(0,0);
+  }
+
+  render(rdt);
+}
+
+/* -------------------------- CrazyGames SDK ----------------------------- */
+/* The game is fully playable with no SDK: store() falls back to localStorage
+   and every call below is a guarded no-op. On CrazyGames the SDK gives us
+   cloud saves (Flux and unlocks follow the player across devices), gameplay
+   analytics, and happytime signals.
+
+   The build flips ENABLE_CG_SDK off for the Artifact copy, whose CSP blocks
+   external scripts - loading it there would only log a violation. */
+var ENABLE_CG_SDK = false;   // disabled for the Artifact build (CSP blocks the SDK)
+
+window.CG = {
+  ready:false, cloud:false, adsOk:false, bannersOk:false, sdk:null,
+
+  init:function(){
+    if(!ENABLE_CG_SDK || !document.head) return;
+    var s = document.createElement('script');
+    s.src = 'https://sdk.crazygames.com/crazygames-sdk-v3.js';
+    // Blocked by CSP, offline, or ad-blocked: stay on localStorage silently.
+    s.onerror = function(){};
+    s.onload = function(){
+      try{
+        var SDK = window.CrazyGames && window.CrazyGames.SDK;
+        if(!SDK || !SDK.init) return;
+        // Every other module throws until init() resolves.
+        SDK.init().then(function(){ window.CG.onReady(SDK); })
+                  .catch(function(){});
+      }catch(e){}
+    };
+    document.head.appendChild(s);
+  },
+
+  onReady:function(SDK){
+    // "disabled" means we are on a domain the SDK does not serve; its calls
+    // throw there, so we keep the local backend and stay quiet.
+    try{ if(SDK.environment === 'disabled') return; }catch(e){ return; }
+
+    this.sdk = SDK;
+    this.ready = true;
+
+    // Adopt cloud storage, folding in anything this device saved first.
+    try{
+      if(SDK.data && typeof SDK.data.getItem === 'function'){
+        adoptCloudSave(SDK.data);
+        this.cloud = true;
+        applyCloudSave();
+      }
+    }catch(e){}
+
+    // Signing in swaps the account under us, so drop the cache and re-apply.
+    try{
+      if(SDK.user && SDK.user.addAuthListener){
+        SDK.user.addAuthListener(function(){
+          refreshCloudSave();
+          applyCloudSave();
+        });
+      }
+    }catch(e){}
+
+    // A revive button that can never fire is a rejection cause, so find out
+    // up front whether ads can actually run for this player.
+    try{
+      this.adsOk = !!(SDK.ad && SDK.ad.requestAd);
+      this.bannersOk = !!(SDK.banner && SDK.banner.requestBanner);
+      if(this.adsOk && SDK.ad.hasAdblock){
+        SDK.ad.hasAdblock()
+          .then(function(blocked){ window.CG.adsOk = !blocked; })
+          .catch(function(){ window.CG.adsOk = true; });
+      }
+    }catch(e){ this.adsOk = false; }
+
+    // The SDK missed the real load, so bracket it now that it can hear us.
+    try{ SDK.game.loadingStart(); SDK.game.loadingStop(); }catch(e){}
+    if(G.mode==='play' || G.mode==='intro'){ this.gameplayStart(); }
+  },
+
+  /* One guarded path for both ad types. The game is blocked from the moment
+     of the request (so nothing is clickable underneath) but only muted once
+     the ad actually starts, which is what the docs ask for. Both guards exist
+     because a game that freezes waiting on an ad is a rejection cause. */
+  requestAd:function(type, onDone, onFail){
+    var self = this;
+    if(!this.ready || !this.sdk.ad || !this.sdk.ad.requestAd){ if(onFail) onFail('nosdk'); return; }
+    var settled = false, startGuard = 0, runGuard = 0;
+    function settle(ok, code){
+      if(settled) return;
+      settled = true;
+      clearTimeout(startGuard); clearTimeout(runGuard);
+      G.adBusy = false;
+      A.duck(false);
+      if(ok){ if(onDone) onDone(); }
+      else { if(onFail) onFail(code||'other'); }
+    }
+    G.adBusy = true;
+    startGuard = setTimeout(function(){ settle(false,'noStart'); }, 8000);
+    try{
+      this.sdk.ad.requestAd(type, {
+        adStarted:function(){
+          clearTimeout(startGuard);
+          A.duck(true);
+          self.gameplayStop();
+          runGuard = setTimeout(function(){ settle(false,'noEnd'); }, 120000);
+        },
+        adFinished:function(){ settle(true); },
+        adError:function(e){ settle(false, e && e.code); }
+      });
+    }catch(e){ settle(false,'threw'); }
+  },
+
+  gameplayStart:function(){ try{ if(this.ready) this.sdk.game.gameplayStart(); }catch(e){} },
+  gameplayStop:function(){  try{ if(this.ready) this.sdk.game.gameplayStop();  }catch(e){} },
+  happytime:function(){     try{ if(this.ready) this.sdk.game.happytime();     }catch(e){} },
+  progress:function(pct){
+    try{ if(this.ready) this.sdk.game.reportGameCompletedPercentage(clamp(Math.round(pct),0,100)); }catch(e){}
+  }
+};
+
+/* Cloud values can land mid-session. Flux, unlocks and best scores are all
+   read live so they need nothing; the equipped core is only consulted when a
+   run is built. Re-rolling the player mid-run would be theft, so we only
+   re-apply while the run is still effectively untouched. */
+function applyCloudSave(){
+  var core = selectedCore();
+  if(P.core === core) return;
+  var untouched = (G.mode==='intro') ||
+                  (G.mode==='play' && G.wave<=1 && G.score===0 && G.kills===0);
+  if(untouched){
+    var wasIntro = (G.mode==='intro');
+    reset();
+    if(!wasIntro && G.mode!=='play'){ G.mode='play'; startWave(1); }
+  }
+  // Otherwise the cloud core simply takes effect on the next run.
+}
+
+window.CG.init();
+
+/* -------------------------------- boot --------------------------------- */
+var booted = false;
+function boot(){
+  if(booted) return;
+  booted = true;
+  A.init(); A.resume();
+  if(window.CG) window.CG.gameplayStart();
+}
+cv.addEventListener('touchstart', function(){ IN.isTouch = true; }, {passive:true, capture:true});
+
+BANNER.init();
+migrateSave();
+reset();
+requestAnimationFrame(frame);
+
+})();
+</script>

@@ -1,0 +1,416 @@
+
+/* ------------------------------- palette ------------------------------- */
+var C = {
+  bg:'#04050c',
+  grid:'rgba(90,150,255,0.055)',
+  player:'#7cf3ff',
+  playerCore:'#ffffff',
+  field:'rgba(124,243,255,0.16)',
+  scrap:'#ffd76a',
+  bolt:'#ff5db1',
+  drone:'#ff6b5a',
+  spinner:'#ffa23e',
+  shooter:'#ff5db1',
+  splitter:'#b06bff',
+  brute:'#ff3d6e',
+  lancer:'#c9d6ff',
+  spike:'#ffffff',
+  boss:'#ff2f5e',
+  shot:'#9dfbff',
+  text:'#eaf2ff',
+  dim:'rgba(234,242,255,0.55)'
+};
+
+/* -------------------------------- input -------------------------------- */
+var IN = {
+  x:VW/2, y:VH/2, down:false, justDown:false, justUp:false, has:false,
+  keys:{}, kx:0, ky:0, kMag:false, anyKey:false, clickX:0, clickY:0, clicked:false
+};
+
+function toWorld(cx,cy){
+  return { x: clamp((cx-offX)/scale, -80, VW+80), y: clamp((cy-offY)/scale, -80, VH+80) };
+}
+function onDown(cx,cy){
+  var p = toWorld(cx,cy);
+  IN.x=p.x; IN.y=p.y; IN.has=true;
+  if(!IN.down){ IN.down=true; IN.justDown=true; }
+  IN.clickX=p.x; IN.clickY=p.y; IN.clicked=true;
+  boot();
+}
+function onMove(cx,cy){
+  var p=toWorld(cx,cy); IN.x=p.x; IN.y=p.y;
+  if(!IN.has && !IN.isTouch){ IN.has=true; cv.className='reticle'; }
+  IN.has=true;
+}
+function onUp(){ if(IN.down){ IN.down=false; IN.justUp=true; } }
+
+cv.addEventListener('mousedown', function(e){ e.preventDefault(); onDown(e.clientX,e.clientY); });
+window.addEventListener('mousemove', function(e){ onMove(e.clientX,e.clientY); });
+window.addEventListener('mouseup', function(e){ onUp(); });
+cv.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+cv.addEventListener('touchstart', function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0]; onDown(t.clientX,t.clientY);
+}, {passive:false});
+cv.addEventListener('touchmove', function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0]; onMove(t.clientX,t.clientY);
+}, {passive:false});
+cv.addEventListener('touchend', function(e){ e.preventDefault(); onUp(); }, {passive:false});
+cv.addEventListener('touchcancel', function(e){ e.preventDefault(); onUp(); }, {passive:false});
+
+/* Keyboard is a full alternative scheme. Blast is radial, so no aiming is
+   needed and arrows / WASD / ZQSD (AZERTY) all work. Escape and Ctrl+W are
+   never bound - CrazyGames reserves them. */
+var MOVE_KEYS = {
+  ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1],
+  KeyA:[-1,0], KeyD:[1,0], KeyW:[0,-1], KeyS:[0,1],
+  KeyQ:[-1,0], KeyZ:[0,-1]
+};
+window.addEventListener('keydown', function(e){
+  if(e.repeat) return;
+  IN.keys[e.code]=true; IN.anyKey=true;
+  if(e.code==='Space' || e.code==='ShiftLeft' || e.code==='ShiftRight'){ e.preventDefault(); IN.kMag=true; }
+  if(MOVE_KEYS[e.code]) e.preventDefault();
+  if(e.code==='KeyM'){ A.setMute(!A.muted); A.sUi(); }
+  if(e.code==='KeyP'){ togglePause(); }
+  if(e.code==='Digit1'||e.code==='Digit2'||e.code==='Digit3'){
+    if(G.mode==='levelup') chooseUpgrade(+e.code.slice(5)-1);
+  }
+  if(e.code==='Enter' && (G.mode==='over' || G.mode==='cores')) restart();
+  if(e.code==='KeyC' && G.mode==='over') openCores();
+  if(G.mode==='revive' && !G.adBusy){
+    if(e.code==='KeyY') takeRevive();
+    if(e.code==='KeyN') finishRun();
+  }
+  boot();
+});
+window.addEventListener('keyup', function(e){
+  IN.keys[e.code]=false;
+  if(e.code==='Space' || e.code==='ShiftLeft' || e.code==='ShiftRight'){
+    IN.kMag=false;
+    if(G.mode==='play'||G.mode==='intro') doBlast();
+  }
+});
+window.addEventListener('blur', function(){
+  IN.keys={}; IN.kMag=false; IN.down=false;
+  if(G.mode==='play') G.paused=true;
+});
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden){ if(G.mode==='play') G.paused=true; }
+});
+
+function keyVector(){
+  var vx=0, vy=0;
+  for(var k in MOVE_KEYS){ if(IN.keys[k]){ vx+=MOVE_KEYS[k][0]; vy+=MOVE_KEYS[k][1]; } }
+  var l=len(vx,vy);
+  if(l>0){ vx/=l; vy/=l; }
+  return [vx,vy,l>0];
+}
+
+/* ------------------------------- upgrades ------------------------------ */
+/* ------------------------------- rarity -------------------------------- */
+/* Three tiers. `w` is the draw weight for one upgrade of that tier, so the
+   pool composition matters less than the tier: commons come up constantly,
+   epics are the cards you build a run around. Rarity only means anything if
+   the rare things are actually stronger, so the epics below are the
+   behaviour-changing upgrades, not just bigger numbers. */
+var RARITY = [
+  { name:'COMMON', w:56, col:'#b9c7de', glow:0.12 },
+  { name:'RARE',   w:30, col:'#5ad2ff', glow:0.20 },
+  { name:'EPIC',   w:12, col:'#c88bff', glow:0.32 }
+];
+var COMMON = 0, RARE = 1, EPIC = 2;
+
+/* `sides` gives each upgrade a stable icon shape - previously the polygon came
+   from the card slot, so the same upgrade looked different every level. */
+var UPGRADES = [
+  {id:'range',  r:COMMON, sides:6, name:'MAGNET FIELD',    desc:'Pull radius +52',                 max:6, ap:function(){ P.magR+=52; }},
+  {id:'cap',    r:COMMON, sides:8, name:'ORBIT SLOTS',     desc:'Hold +2 more objects',            max:5, ap:function(){ P.cap+=2; }},
+  {id:'speed',  r:COMMON, sides:3, name:'THRUSTERS',       desc:'Move speed +15%',                 max:5, ap:function(){ P.spd*=1.15; }},
+  {id:'scav',   r:COMMON, sides:7, name:'SCAVENGER',       desc:'Faster pull, denser scrap field', max:4, ap:function(){ P.pullMul*=1.36; G.scrapCap+=12; }},
+  {id:'hull',   r:COMMON, sides:5, name:'REINFORCED HULL', desc:'+1 max life, heal 2',             max:3, ap:function(){ P.maxHp++; P.hp=Math.min(P.maxHp,P.hp+2); }},
+
+  {id:'over',   r:RARE,   sides:4, name:'OVERCHARGE',      desc:'Blast +22% speed, pierce +1',     max:3, ap:function(){ P.blastSpd*=1.22; P.pierce+=1; }},
+  {id:'spin',   r:RARE,   sides:8, name:'SPIN CYCLE',      desc:'Orbit spins faster and grinds',   max:4, ap:function(){ P.omega+=0.55; P.orbR+=5; P.orbDmg+=1; }},
+  {id:'heavy',  r:RARE,   sides:6, name:'HEAVY SLUGS',     desc:'Blasted objects +1 damage',       max:2, ap:function(){ P.dmg+=1; }},
+  {id:'siphon', r:RARE,   sides:5, name:'SIPHON',          desc:'Restores 1 life once per wave',   max:2, ap:function(){ P.siphon+=1; }},
+
+  {id:'repulse',r:EPIC,   sides:7, name:'REPULSE WAVE',    desc:'Every blast releases a shockwave',max:3, ap:function(){ P.repulse+=1; }},
+  {id:'static', r:EPIC,   sides:3, name:'STATIC CHARGE',   desc:'Orbit arcs lightning, harder each stack', max:3, ap:function(){ P.stat+=1; }},
+  {id:'ric',    r:EPIC,   sides:4, name:'RICOCHET',        desc:'Blasted objects bounce off walls twice',  max:2, ap:function(){ P.bounce+=2; }}
+];
+
+/* -------------------------------- cores -------------------------------- */
+/* Meta-progression. Every run pays out Flux; Flux unlocks starting cores.
+   Cores are not stat bumps - each one rewrites the opening build enough to
+   change how you play the first thirty seconds, which is what brings people
+   back for run two. Player hues stay in the cool range; enemies own the warm
+   half of the spectrum, so a core can never be mistaken for a threat. */
+var CORES = [
+  { id:'prospector', name:'PROSPECTOR', cost:0, col:'#7cf3ff', sides:3,
+    tag:'The standard core. Balanced, forgiving, nothing to unlearn.',
+    stats:['3 lives, 6 slots','Standard pull','Standard blast'],
+    ap:function(p){} },
+
+  { id:'warden', name:'WARDEN', cost:150, col:'#6effc0', sides:6,
+    tag:'Heavy shell, short reach. Wear your orbit into the swarm like a saw.',
+    stats:['4 lives, 4 slots','Orbit grinds x2','Slower, shorter reach'],
+    ap:function(p){ p.hp=4; p.maxHp=4; p.orbDmg=2; p.orbR+=8;
+                    p.cap=4; p.magR-=35; p.spd*=0.85; p.blastSpd*=0.85; } },
+
+  { id:'maw', name:'MAW', cost:450, col:'#5ab9ff', sides:8,
+    tag:'A hungry ring. Swallow half the field before you let go of it.',
+    stats:['11 orbit slots','Pull +25%','2 lives, slower'],
+    ap:function(p){ p.cap=11; p.pullMul=1.25; p.hp=2; p.maxHp=2;
+                    p.spd*=0.88; p.blastSpd*=0.90; } },
+
+  { id:'needle', name:'NEEDLE', cost:900, col:'#b6f0ff', sides:3,
+    tag:'Glass and spite. Four slugs that go straight through everything.',
+    stats:['2 lives, 5 slots','+1 damage, +2 pierce','Blast +25% speed'],
+    ap:function(p){ p.hp=2; p.maxHp=2; p.cap=5; p.dmg+=1; p.pierce+=2;
+                    p.blastSpd*=1.25; } },
+
+  { id:'pulsar', name:'PULSAR', cost:1500, col:'#eaf4ff', sides:5,
+    tag:'Built to detonate, not to collect. Every release is a shockwave.',
+    stats:['Repulse wave','Static charge','2 lives, 4 slots'],
+    ap:function(p){ p.repulse=1; p.stat=1; p.cap=4; p.hp=2; p.maxHp=2;
+                    p.magR-=45; p.spd*=0.94; } },
+
+  { id:'drifter', name:'DRIFTER', cost:1800, col:'#8affe0', sides:4,
+    tag:'No drag while pulling. You never have to stop moving again.',
+    stats:['Full speed while held','Move speed +25%','2 lives, 5 slots'],
+    ap:function(p){ p.holdMul=1.0; p.spd*=1.25; p.hp=2; p.maxHp=2; p.cap=5; } }
+];
+
+function coreById(id){
+  for(var i=0;i<CORES.length;i++) if(CORES[i].id===id) return CORES[i];
+  return CORES[0];
+}
+function num(v){ var n = parseInt(v||'0',10); return isNaN(n) ? 0 : n; }
+function spentFlux(){
+  var l = ownedList(), total = 0;
+  for(var i=0;i<CORES.length;i++) if(l.indexOf(CORES[i].id)>=0) total += CORES[i].cost;
+  return total;
+}
+/* Balance is derived, never stored, so it can never disagree with `owned`. */
+function getEarned(){ return num(store('mgn.earned')); }
+function getFlux(){ return Math.max(0, getEarned() - spentFlux()); }
+function addFlux(n){ store('mgn.earned', String(getEarned() + Math.max(0, Math.round(n)))); }
+
+/* Saves written before the earned/spent model stored a balance. */
+function migrateSave(){
+  if(store('mgn.earned') !== null) return;
+  var old = store('mgn.flux');
+  if(old === null) return;
+  store('mgn.earned', String(num(old) + spentFlux()));
+}
+
+/* Merge local and cloud saves without ever taking something away: unlocks
+   union, monotonic counters take the max, and the equipped core has to be one
+   the player actually owns afterwards. */
+function mergeSave(local, cloud){
+  var ids = {}, i, l;
+  l = (local['mgn.owned']||'prospector').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) ids[l[i]] = 1;
+  l = (cloud['mgn.owned']||'prospector').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) ids[l[i]] = 1;
+  var owned = [];
+  for(i=0;i<CORES.length;i++) if(ids[CORES[i].id]) owned.push(CORES[i].id);
+  if(owned.indexOf('prospector') < 0) owned.unshift('prospector');
+
+  var core = cloud['mgn.core'];
+  if(!core || owned.indexOf(core) < 0) core = local['mgn.core'];
+  if(!core || owned.indexOf(core) < 0) core = 'prospector';
+
+  return {
+    'mgn.owned':    owned.join(','),
+    'mgn.core':     core,
+    'mgn.earned':   String(Math.max(num(local['mgn.earned']),   num(cloud['mgn.earned']))),
+    'mgn.best':     String(Math.max(num(local['mgn.best']),     num(cloud['mgn.best']))),
+    'mgn.bestwave': String(Math.max(num(local['mgn.bestwave']), num(cloud['mgn.bestwave']))),
+    'mgn.played':   (local['mgn.played']==='1' || cloud['mgn.played']==='1') ? '1' : null
+  };
+}
+
+/* Switch store() onto the SDK data module, folding in whatever this device
+   already had. The SDK migrates its own guest data on sign-in, but guest
+   progress written straight to localStorage before the SDK loaded is invisible
+   to it - this is what keeps that from being lost. */
+function adoptCloudSave(dataModule){
+  var local = {}, cloud = {}, i, k;
+  for(i=0;i<SYNC_KEYS.length;i++){ k=SYNC_KEYS[i]; local[k] = store(k); }
+  saveBackend = dataModule;
+  saveCache = {};
+  for(i=0;i<SYNC_KEYS.length;i++){ k=SYNC_KEYS[i]; cloud[k] = store(k); }
+  var merged = mergeSave(local, cloud);
+  for(k in merged) if(merged[k] !== null) store(k, merged[k]);
+  return merged;
+}
+
+/* The account swaps underneath us on sign-in, so the cache has to go. */
+function refreshCloudSave(){ saveCache = {}; }
+function ownedList(){ return (store('mgn.owned')||'prospector').split(','); }
+function owns(id){ return id==='prospector' || ownedList().indexOf(id)>=0; }
+function selectedCore(){
+  var id = store('mgn.core') || 'prospector';
+  return owns(id) ? id : 'prospector';
+}
+function equipCore(id){ if(owns(id)) store('mgn.core', id); }
+function buyCore(id){
+  var c = coreById(id);
+  if(!c || owns(id)) return false;
+  if(getFlux() < c.cost) return false;
+  var l = ownedList();   // the spend is implied by ownership, never deducted
+  if(l.indexOf(id) < 0) l.push(id);
+  store('mgn.owned', l.join(','));
+  return true;
+}
+/* Depth is worth more than score, so a deep careful run beats farming wave 3.
+   The flat term keeps a short first run from feeling like it paid nothing. */
+function fluxFor(score, wave){ return 15 + Math.floor(score/150) + wave*4; }
+
+/* ------------------------------ game state ----------------------------- */
+var P = {};
+var G = {};
+
+function newPlayer(){
+  var p = {
+    x:VW/2, y:VH/2, vx:0, vy:0, r:13,
+    hp:3, maxHp:3, inv:0,
+    magR:175, cap:6, spd:400, blastSpd:940, pierce:1, dmg:1,
+    repulse:0, siphon:0, omega:2.5, orbR:46, orbDmg:1, bounce:0,
+    pullMul:1, stat:0, statT:0, orbBase:0, holdMul:0.60,
+    killsSinceHeal:0, charge:0, blastCool:0,
+    core:'prospector', sides:3
+  };
+  var core = coreById(selectedCore());
+  p.core = core.id;
+  p.sides = core.sides;
+  core.ap(p);
+  C.player = core.col;   // the whole player accent follows the equipped core
+  return p;
+}
+
+function newGame(){
+  return {
+    mode:'intro', paused:false, timeScale:1, hitStop:0, t:0, uiT:0,
+    wave:0, waveT:0, betweenT:0, spawnQ:[],
+    score:0, level:1, xp:0, xpNeed:9,
+    combo:0, comboT:0, bestCombo:0, kills:0,
+    shake:0, flash:0, pulse:0, chroma:0,
+    cards:[], scrapCap:44,
+    introStep:0, introT:0, introPulled:false, introBlasted:false,
+    bossRef:null, waveBanner:0, waveBannerTxt:'',
+    deathT:0, ended:false, dmgFlash:0,
+    postDeath:false, runFinished:false, revived:false, watchedAd:false, adAttempted:false,
+    reviveT:0, adBusy:false, adMsg:'', adMsgT:0
+  };
+}
+
+var scrap=[], enemies=[], bolts=[], shots=[], orbit=[], parts=[], pops=[], waves=[], zaps=[];
+
+function reset(){
+  P = newPlayer();
+  G = newGame();
+  scrap.length=0; enemies.length=0; bolts.length=0; shots.length=0;
+  orbit.length=0; parts.length=0; pops.length=0; waves.length=0; zaps.length=0;
+  for(var i=0;i<30;i++) addScrap(true);
+  if(store('mgn.played')==='1'){ G.mode='play'; startWave(1); }
+}
+
+/* ------------------------------- spawning ------------------------------ */
+function addScrap(anywhere){
+  var x,y,tries=0;
+  do{
+    x = rnd(40, VW-40); y = rnd(40, VH-40); tries++;
+  } while(tries<12 && len(x-P.x, y-P.y) < (anywhere?120:220));
+  scrap.push({ x:x, y:y, vx:rnd(-16,16), vy:rnd(-16,16), r:rnd(5,8), a:rnd(0,TAU), sp:rnd(-2,2), life:0 });
+}
+
+function edgePoint(){
+  var s = ri(0,3), m = 46;
+  if(s===0) return {x:rnd(m,VW-m), y:m};
+  if(s===1) return {x:VW-m, y:rnd(m,VH-m)};
+  if(s===2) return {x:rnd(m,VW-m), y:VH-m};
+  return {x:m, y:rnd(m,VH-m)};
+}
+
+/* Player tops out at 400 u/s (240 while holding the magnet), so enemy speeds
+   are set relative to that: early waves are comfortably outrunnable, late
+   waves close the gap and holding the magnet becomes a real commitment. */
+var ETYPE = {
+  drone:   {r:14, hp:1, spd:132, xp:1, sc:10,  col:C.drone},
+  spinner: {r:12, hp:1, spd:252, xp:1, sc:16,  col:C.spinner},
+  shooter: {r:17, hp:2, spd:112, xp:2, sc:28,  col:C.shooter},
+  splitter:{r:22, hp:3, spd:96,  xp:3, sc:44,  col:C.splitter},
+  brute:   {r:31, hp:9, spd:82,  xp:5, sc:80,  col:C.brute},
+  lancer:  {r:19, hp:4, spd:104, xp:3, sc:60,  col:C.lancer},
+  boss:    {r:58, hp:44, spd:52, xp:16,sc:400, col:C.boss}
+};
+
+function makeEnemy(type, x, y){
+  var d = ETYPE[type];
+  var wave = Math.max(1,G.wave);
+  var hp = d.hp;
+  if(type==='boss') hp = 30 + Math.floor(wave/5-1)*20;
+  else if(wave>8) hp += Math.floor((wave-8)/3);
+  return {
+    type:type, x:x, y:y, vx:0, vy:0, r:d.r,
+    hp:hp, maxHp:hp, spd:d.spd*(1+Math.min(0.80, wave*0.030)),
+    col:d.col, xp:d.xp, sc:d.sc,
+    t:rnd(0,10), fire:rnd(0.8,2.2), flash:0, dead:false, charge:0,
+    phase:0, phaseT:0, wob:rnd(0,TAU), spawnA:0.6
+  };
+}
+
+function spawnAt(type, pt){
+  var e = makeEnemy(type, pt.x, pt.y);
+  enemies.push(e);
+  waves.push({x:pt.x, y:pt.y, r:6, max:type==='boss'?110:46, life:0.6, col:e.col, w:3});
+  return e;
+}
+
+function startWave(n){
+  G.wave = n;
+  G.waveT = 0;
+  G.healedThisWave = false;
+  // Wave 30 is a deep run; report progress against that as "complete".
+  if(window.CG) window.CG.progress(Math.min(100, n/30*100));
+  G.spawnQ.length = 0;
+  var isBoss = (n % 5 === 0);
+  if(isBoss){
+    G.waveBannerTxt = 'WAVE ' + n + '  •  GUARDIAN';
+    G.spawnQ.push({t:'boss', at:0.35, pt:{x:VW/2, y:120}});
+    A.sBoss();
+  } else {
+    G.waveBannerTxt = 'WAVE ' + n;
+    // Gentle first waves (first impression decides bounce rate on a portal),
+    // saturating through the mid game, then steady linear growth so late
+    // waves keep escalating instead of plateauing.
+    var budget = Math.round(3 + 30*(1 - Math.exp(-n/10)) + Math.max(0, n-12)*2.0);
+
+    // Weighted pool: drones thin out as tougher types take over the budget,
+    // so wave 25 is not just fifty drones.
+    var pool = [{t:'drone', c:1, w:Math.max(1.2, 8 - n*0.32)}];
+    if(n>=2) pool.push({t:'spinner',  c:2, w:2.6});
+    if(n>=3) pool.push({t:'shooter',  c:3, w:1.8 + n*0.14});
+    if(n>=6) pool.push({t:'splitter', c:4, w:1.2 + n*0.12});
+    if(n>=8) pool.push({t:'brute',    c:7, w:0.9 + n*0.10});
+    if(n>=11) pool.push({t:'lancer',  c:5, w:1.4 + n*0.13});
+
+    var list=[], guard=0;
+    while(budget>0 && guard++<160){
+      var opts=[], total=0, i;
+      for(i=0;i<pool.length;i++) if(pool[i].c<=budget){ opts.push(pool[i]); total+=pool[i].w; }
+      if(!opts.length) break;
+      var roll = Math.random()*total, p = opts[opts.length-1];
+      for(i=0;i<opts.length;i++){ roll -= opts[i].w; if(roll<=0){ p = opts[i]; break; } }
+      budget -= p.c; list.push(p.t);
+    }
+    for(var j=0;j<list.length;j++) G.spawnQ.push({t:list[j], at:j*0.17, pt:edgePoint()});
+    A.sWave();
+  }
+  G.waveBanner = 2.0;
+}

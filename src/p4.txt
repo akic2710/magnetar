@@ -1,0 +1,327 @@
+
+/* ------------------------------ enemies -------------------------------- */
+var SHOT_SEEK = 330, SHOT_TURN = 7.5;
+var LANCE_TELL = 0.85;
+var RAGE_AFTER = 22;
+
+/* Stragglers get faster the longer a wave drags on, so a wave can never
+   stall into a boring stalemate. Also drives the pace of a run upward. */
+function rageMul(){
+  if(G.mode!=='play' || G.waveT <= RAGE_AFTER) return 1;
+  return 1 + Math.min(0.85, (G.waveT-RAGE_AFTER)*0.05);
+}
+
+function updateEnemies(dt){
+  var rage = rageMul();
+  for(var i=enemies.length-1; i>=0; i--){
+    var e = enemies[i];
+    if(e.dead){ enemies.splice(i,1); continue; }
+    e.t += dt;
+    e.flash = Math.max(0, e.flash-dt*6);
+
+    if(e.spawnA>0){
+      e.spawnA -= dt;
+      continue;
+    }
+
+    var es = e.spd * (e.type==='boss' ? 1 : rage);
+    var dx = P.x-e.x, dy = P.y-e.y, d = Math.max(0.01, len(dx,dy));
+    var ux = dx/d, uy = dy/d;
+
+    if(e.type==='drone'){
+      e.vx += ux*es*3.2*dt; e.vy += uy*es*3.2*dt;
+      var sp = len(e.vx,e.vy);
+      if(sp>es){ e.vx=e.vx/sp*es; e.vy=e.vy/sp*es; }
+    }
+    else if(e.type==='spinner'){
+      e.wob += dt*5.5;
+      var px=-uy, py=ux;
+      var swirl = Math.sin(e.wob)*0.85;
+      e.vx += (ux+px*swirl)*es*3.4*dt;
+      e.vy += (uy+py*swirl)*es*3.4*dt;
+      var sp2 = len(e.vx,e.vy);
+      if(sp2>es){ e.vx=e.vx/sp2*es; e.vy=e.vy/sp2*es; }
+    }
+    else if(e.type==='shooter'){
+      var want = 320;
+      var drive = (d-want)/140;
+      drive = clamp(drive,-1,1);
+      var sx=-uy, sy=ux;
+      var strafe = Math.sin(e.t*0.9+e.wob)*0.9;
+      e.vx += (ux*drive + sx*strafe)*es*3*dt;
+      e.vy += (uy*drive + sy*strafe)*es*3*dt;
+      var sp3 = len(e.vx,e.vy);
+      if(sp3>es){ e.vx=e.vx/sp3*es; e.vy=e.vy/sp3*es; }
+      e.fire -= dt;
+      if(e.fire<=0){
+        e.fire = rnd(1.7,2.4);
+        fireBolt(e, ux, uy, 250, 1);
+      }
+    }
+    else if(e.type==='splitter'){
+      e.vx += ux*es*2.6*dt; e.vy += uy*es*2.6*dt;
+      var sp4=len(e.vx,e.vy);
+      if(sp4>es){ e.vx=e.vx/sp4*es; e.vy=e.vy/sp4*es; }
+    }
+    else if(e.type==='brute'){
+      e.vx += ux*es*2.2*dt; e.vy += uy*es*2.2*dt;
+      var sp5=len(e.vx,e.vy);
+      if(sp5>es){ e.vx=e.vx/sp5*es; e.vy=e.vy/sp5*es; }
+    }
+    else if(e.type==='lancer'){
+      // Snipes from range with a NON-magnetic spike, so holding the magnet
+      // is no longer a free bullet shield. Pure dodge pressure.
+      var far = 400;
+      var push = clamp((d-far)/150,-1,1);
+      var lx=-uy, ly=ux;
+      var sway = Math.sin(e.t*0.7+e.wob)*0.7;
+      e.vx += (ux*push + lx*sway)*es*2.4*dt;
+      e.vy += (uy*push + ly*sway)*es*2.4*dt;
+      var sp6 = len(e.vx,e.vy);
+      if(sp6>es){ e.vx=e.vx/sp6*es; e.vy=e.vy/sp6*es; }
+      if(e.charge>0){
+        e.charge -= dt;
+        e.aimX = ux; e.aimY = uy;
+        if(e.charge<=0){
+          fireBolt(e, e.aimX, e.aimY, 660, 1, false);
+          A.tone(1500,0.16,'sawtooth',0.10,300);
+          e.fire = rnd(2.2,3.2);
+        }
+      } else {
+        e.fire -= dt;
+        if(e.fire<=0){ e.charge = LANCE_TELL; e.aimX=ux; e.aimY=uy; A.tone(240,0.5,'triangle',0.06,700); }
+      }
+    }
+    else if(e.type==='boss'){
+      updateBoss(e, dt, ux, uy, d);
+    }
+
+    e.vx *= (1-1.1*dt); e.vy *= (1-1.1*dt);
+    e.x += e.vx*dt; e.y += e.vy*dt;
+
+    var m = e.r+2;
+    if(e.x<m){ e.x=m; e.vx=Math.abs(e.vx)*0.5; }
+    if(e.x>VW-m){ e.x=VW-m; e.vx=-Math.abs(e.vx)*0.5; }
+    if(e.y<m){ e.y=m; e.vy=Math.abs(e.vy)*0.5; }
+    if(e.y>VH-m){ e.y=VH-m; e.vy=-Math.abs(e.vy)*0.5; }
+
+    // contact with player
+    if(G.mode!=='levelup' && len(P.x-e.x, P.y-e.y) < P.r + e.r*0.86){
+      hurtPlayer();
+      var kx = (P.x-e.x), ky = (P.y-e.y), kd = Math.max(0.01,len(kx,ky));
+      P.vx = kx/kd*430; P.vy = ky/kd*430;
+      if(e.type!=='brute' && e.type!=='boss'){ e.vx = -kx/kd*260; e.vy = -ky/kd*260; }
+    }
+  }
+}
+
+function fireBolt(e, ux, uy, speed, dmg, magnetic){
+  var mag = (magnetic===undefined) ? true : magnetic;
+  bolts.push({x:e.x+ux*(e.r+6), y:e.y+uy*(e.r+6), vx:ux*speed, vy:uy*speed,
+              r:mag?8:6, life:mag?6:3.2, a:rnd(0,TAU), mag:mag});
+  if(mag) A.tone(300,0.1,'square',0.07,180);
+}
+
+function updateBoss(e, dt, ux, uy, d){
+  e.phaseT -= dt;
+  var cx = VW/2, cy = VH/2;
+  var tox = cx-e.x, toy = cy-e.y;
+  var td = Math.max(0.01, len(tox,toy));
+  var driftx = tox/td, drifty = toy/td;
+  var orbitAng = e.t*0.55;
+  var tgx = cx + Math.cos(orbitAng)*260, tgy = cy + Math.sin(orbitAng)*150;
+  var gx = tgx-e.x, gy = tgy-e.y, gd = Math.max(0.01,len(gx,gy));
+  e.vx += gx/gd*e.spd*2.4*dt;
+  e.vy += gy/gd*e.spd*2.4*dt;
+  var sp = len(e.vx,e.vy);
+  if(sp>e.spd){ e.vx=e.vx/sp*e.spd; e.vy=e.vy/sp*e.spd; }
+
+  if(e.phaseT<=0){
+    e.phase = (e.phase+1)%3;
+    e.phaseT = e.phase===1 ? 3.0 : 2.6;
+    e.sub = 0; e.subT = 0.4;
+    if(e.phase===0) ring(e.x,e.y,e.r*2.6,'rgba(255,47,94,0.6)',0.5,4);
+  }
+  e.subT -= dt;
+  if(e.subT<=0){
+    if(e.phase===0){ // radial burst
+      e.subT = 1.05;
+      var count = 14;
+      var off = rnd(0,TAU);
+      for(var i=0;i<count;i++){
+        var a = off + i*TAU/count;
+        fireBolt(e, Math.cos(a), Math.sin(a), 195, 1);
+      }
+      shakeIt(5);
+    } else if(e.phase===1){ // spiral stream
+      e.subT = 0.10;
+      e.spiral = (e.spiral||0) + 0.62;
+      fireBolt(e, Math.cos(e.spiral), Math.sin(e.spiral), 235, 1);
+      fireBolt(e, Math.cos(e.spiral+Math.PI), Math.sin(e.spiral+Math.PI), 235, 1);
+    } else { // summon + aimed shots
+      e.subT = 1.3;
+      e.sub++;
+      if(e.sub<=2){
+        for(var k=0;k<3;k++){
+          var an = rnd(0,TAU);
+          var s = spawnAt('drone', {x:clamp(e.x+Math.cos(an)*70,30,VW-30), y:clamp(e.y+Math.sin(an)*70,30,VH-30)});
+          s.spawnA = 0.35;
+        }
+      } else {
+        for(var q=-1;q<=1;q++){
+          var aa = Math.atan2(uy,ux)+q*0.24;
+          fireBolt(e, Math.cos(aa), Math.sin(aa), 300, 1);
+        }
+      }
+    }
+  }
+}
+
+/* -------------------------------- bolts -------------------------------- */
+function updateBolts(dt){
+  for(var i=bolts.length-1;i>=0;i--){
+    var b = bolts[i];
+    b.life -= dt;
+    b.a += dt*6;
+    b.x += b.vx*dt; b.y += b.vy*dt;
+    if(b.life<=0 || b.x<-40||b.x>VW+40||b.y<-40||b.y>VH+40){ bolts.splice(i,1); continue; }
+    if(G.mode!=='levelup' && len(P.x-b.x,P.y-b.y) < P.r+b.r*0.8){
+      bolts.splice(i,1);
+      hurtPlayer();
+      continue;
+    }
+  }
+}
+
+/* -------------------------------- shots -------------------------------- */
+function updateShots(dt){
+  for(var i=shots.length-1;i>=0;i--){
+    var s = shots[i];
+    s.life -= dt;
+    if(s.shock){
+      s.r += (s.max - s.r)*(1-Math.exp(-9*dt)) + 260*dt;
+      for(var j=0;j<enemies.length;j++){
+        var e2 = enemies[j];
+        if(e2.dead||e2.spawnA>0) continue;
+        if(s.hitIds.indexOf(e2)>=0) continue;
+        var dd = len(e2.x-s.x, e2.y-s.y);
+        if(dd < s.r + e2.r && dd > s.r - 60){
+          s.hitIds.push(e2);
+          var nx=(e2.x-s.x)/Math.max(0.01,dd), ny=(e2.y-s.y)/Math.max(0.01,dd);
+          damageEnemy(e2, s.dmg, nx*300, ny*300);
+        }
+      }
+      if(s.life<=0) shots.splice(i,1);
+      continue;
+    }
+    s.a += dt*10;
+
+    // Magnetically guided: slugs curve toward nearby enemies. This is what
+    // makes an aimless radial blast actually lethal - without it the player
+    // can hold the button forever and never clear a wave.
+    var tgt=null, tdist=SHOT_SEEK;
+    for(var h=0;h<enemies.length;h++){
+      var en2 = enemies[h];
+      if(en2.dead || en2.spawnA>0) continue;
+      if(s.hitIds.indexOf(en2)>=0) continue;
+      var hd = len(en2.x-s.x, en2.y-s.y);
+      if(hd < tdist){ tdist = hd; tgt = en2; }
+    }
+    if(tgt){
+      var cur = Math.atan2(s.vy,s.vx);
+      var want = Math.atan2(tgt.y-s.y, tgt.x-s.x);
+      var diff = ((want-cur+Math.PI*3)%TAU)-Math.PI;
+      var maxTurn = SHOT_TURN*dt;
+      var na = cur + clamp(diff,-maxTurn,maxTurn);
+      var spd = len(s.vx,s.vy);
+      s.vx = Math.cos(na)*spd; s.vy = Math.sin(na)*spd;
+    }
+
+    s.x += s.vx*dt; s.y += s.vy*dt;
+
+    var bounced=false;
+    if(s.bounce>0){
+      if(s.x<s.r){ s.x=s.r; s.vx=Math.abs(s.vx); bounced=true; }
+      else if(s.x>VW-s.r){ s.x=VW-s.r; s.vx=-Math.abs(s.vx); bounced=true; }
+      if(s.y<s.r){ s.y=s.r; s.vy=Math.abs(s.vy); bounced=true; }
+      else if(s.y>VH-s.r){ s.y=VH-s.r; s.vy=-Math.abs(s.vy); bounced=true; }
+      if(bounced){ s.bounce--; spark(s.x,s.y,3,C.shot,50,160,0.1,0.22,2); }
+    }
+
+    if(s.life<=0 || s.x<-30||s.x>VW+30||s.y<-30||s.y>VH+30){
+      shots.splice(i,1); continue;
+    }
+
+    // trail
+    if(Math.random()<0.55){
+      parts.push({x:s.x,y:s.y,vx:rnd(-14,14),vy:rnd(-14,14),life:0.16,max:0.16,r:s.r*0.55,col:s.kind==='bolt'?C.bolt:C.shot,drag:3});
+    }
+
+    for(var k=0;k<enemies.length;k++){
+      var e = enemies[k];
+      if(e.dead||e.spawnA>0) continue;
+      if(s.hitIds.indexOf(e)>=0) continue;
+      if(len(e.x-s.x, e.y-s.y) < e.r + s.r){
+        s.hitIds.push(e);
+        var vl = Math.max(0.01, len(s.vx,s.vy));
+        damageEnemy(e, s.dmg, s.vx/vl*260, s.vy/vl*260);
+        s.pierce--;
+        if(s.pierce<0){ shots.splice(i,1); break; }
+      }
+    }
+  }
+}
+
+/* ------------------------------ wave flow ------------------------------ */
+function updateWaveFlow(dt){
+  if(G.mode!=='play') return;
+  G.waveT += dt;
+
+  for(var i=G.spawnQ.length-1;i>=0;i--){
+    if(G.waveT >= G.spawnQ[i].at){
+      var q = G.spawnQ[i];
+      var e = spawnAt(q.t, q.pt);
+      if(q.t==='boss') G.bossRef = e;
+      G.spawnQ.splice(i,1);
+    }
+  }
+
+  if(G.spawnQ.length===0 && enemies.length===0){
+    if(!G.clearShown){ G.clearShown = true; popText(VW/2, VH/2-60, 'WAVE CLEAR', C.player, 34); }
+    G.betweenT += dt;
+    if(G.betweenT > 1.6){
+      G.betweenT = 0; G.clearShown = false;
+      startWave(G.wave+1);
+    }
+  } else {
+    G.betweenT = 0; G.clearShown = false;
+  }
+}
+
+/* ------------------------------ particles ------------------------------ */
+function updateParticles(dt){
+  for(var i=parts.length-1;i>=0;i--){
+    var p = parts[i];
+    p.life -= dt;
+    if(p.life<=0){ parts.splice(i,1); continue; }
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    var dr = 1-Math.min(0.9, p.drag*dt);
+    p.vx*=dr; p.vy*=dr;
+  }
+  for(var j=pops.length-1;j>=0;j--){
+    var t = pops[j];
+    t.life -= dt;
+    if(t.life<=0){ pops.splice(j,1); continue; }
+    t.y += t.vy*dt; t.vy *= (1-2*dt);
+  }
+  for(var w=waves.length-1;w>=0;w--){
+    var wv = waves[w];
+    wv.life -= dt;
+    if(wv.life<=0){ waves.splice(w,1); continue; }
+    wv.r += (wv.max-wv.r)*(1-Math.exp(-7*dt));
+  }
+  for(var z=zaps.length-1;z>=0;z--){
+    zaps[z].life -= dt;
+    if(zaps[z].life<=0) zaps.splice(z,1);
+  }
+}

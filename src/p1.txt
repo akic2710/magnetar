@@ -1,0 +1,285 @@
+<title>Magnetar</title>
+<style>
+  html,body{height:100%;margin:0;background:#04050c;overflow:hidden;}
+  body{
+    color:#eaf2ff;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;
+    touch-action:none;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+  /* The native cursor is only hidden once the player has actually moved the
+     mouse, at which point the game draws its own reticle. */
+  #stage{position:fixed;inset:0;width:100%;height:100%;display:block;background:#04050c;cursor:crosshair;}
+  #stage.reticle{cursor:none;}
+
+  /* Banner ad, shown only on the death screen. Kept clear of the game's
+     buttons so a mis-tap can never land on an ad. */
+  #mgn-banner-wrap{
+    position:fixed; display:none; z-index:5;
+    flex-direction:column; align-items:center; gap:4px;
+    touch-action:auto;
+  }
+  #mgn-banner-wrap.on{ display:flex; }
+  #mgn-banner-label{
+    font:700 9px/1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    letter-spacing:.18em; color:rgba(234,242,255,.38); user-select:none;
+  }
+  #mgn-banner{ overflow:hidden; background:transparent; }
+</style>
+<canvas id="stage"></canvas>
+<div id="mgn-banner-wrap" aria-hidden="true">
+  <div id="mgn-banner-label">ADVERTISEMENT</div>
+  <div id="mgn-banner"></div>
+</div>
+<script>
+(function(){
+'use strict';
+
+/* =========================================================================
+   MAGNETAR - hold to pull, release to blast.
+   Single-file HTML5 arena roguelite. No external assets or network calls.
+   ========================================================================= */
+
+var VW = 1280, VH = 720, TAU = Math.PI * 2;
+
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function ri(a,b){ return Math.floor(a+Math.random()*(b-a+1)); }
+function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+function len(x,y){ return Math.sqrt(x*x+y*y); }
+
+/* ----------------------------- persistence -----------------------------
+   store() reads and writes through whichever backend is available, in order
+   of preference:
+     1. the CrazyGames SDK data module - synced to the player's account and
+        across their devices (adopted at runtime once the SDK finishes init)
+     2. localStorage - per-device, the default before/without the SDK
+     3. an in-memory map - private mode, sandboxed iframes, blocked storage
+   Reads are served from a cache so per-frame HUD lookups cost nothing, and
+   every path is exception-safe: storage that throws degrades to memory
+   rather than breaking the run. */
+var SYNC_KEYS  = ['mgn.earned','mgn.owned','mgn.core','mgn.best','mgn.bestwave','mgn.played'];
+var LOCAL_ONLY = {'mgn.mute':1};   // a device preference, not account state
+var saveBackend = null;            // null = localStorage, else SDK data module
+var saveCache = {};
+
+function rawGet(k){
+  try{
+    if(saveBackend && !LOCAL_ONLY[k]) return saveBackend.getItem(k);
+    return localStorage.getItem(k);
+  }catch(e){ return null; }
+}
+function rawSet(k,v){
+  try{
+    if(saveBackend && !LOCAL_ONLY[k]){ saveBackend.setItem(k,v); return; }
+    localStorage.setItem(k,v);
+  }catch(e){}
+}
+function store(k,v){
+  if(v===undefined){
+    if(k in saveCache) return saveCache[k];   // cached misses are null, and `in` still finds them
+    var got = rawGet(k);
+    saveCache[k] = got;
+    return got;
+  }
+  v = String(v);
+  saveCache[k] = v;
+  rawSet(k,v);
+  return v;
+}
+
+/* ------------------------------- canvas -------------------------------- */
+var cv = document.getElementById('stage');
+var ctx = cv.getContext('2d', {alpha:false});
+var dpr = 1, scale = 1, offX = 0, offY = 0, cssW = 0, cssH = 0;
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  cssW = window.innerWidth||VW; cssH = window.innerHeight||VH;
+  cv.width  = Math.max(1,Math.round(cssW*dpr));
+  cv.height = Math.max(1,Math.round(cssH*dpr));
+  cv.style.width = cssW+'px'; cv.style.height = cssH+'px';
+  scale = Math.min(cssW/VW, cssH/VH);
+  offX = (cssW - VW*scale)/2;
+  offY = (cssH - VH*scale)/2;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize,150); });
+resize();
+
+/* ---------------------------- glow sprites ----------------------------- */
+var glowCache = {};
+function glow(color){
+  var g = glowCache[color];
+  if(g) return g;
+  var s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  var g2 = c.getContext('2d');
+  var grd = g2.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  grd.addColorStop(0.00, color);
+  grd.addColorStop(0.20, color);
+  grd.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g2.fillStyle = grd;
+  g2.fillRect(0,0,s,s);
+  glowCache[color] = c;
+  return c;
+}
+function blob(x,y,r,color,alpha){
+  ctx.globalAlpha = (alpha===undefined?1:alpha);
+  ctx.drawImage(glow(color), x-r, y-r, r*2, r*2);
+  ctx.globalAlpha = 1;
+}
+
+/* -------------------------------- audio -------------------------------- */
+var A = {
+  ctx:null, master:null, sfxBus:null, musBus:null, noise:null,
+  muted: store('mgn.mute')==='1',
+  hum:null, hum2:null, humGain:null, humFilt:null, ready:false,
+  musT:0, step:0, bar:0,
+
+  init:function(){
+    if(this.ctx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    try{ this.ctx = new AC(); }catch(e){ return; }
+    var c = this.ctx;
+    this.master = c.createGain(); this.master.gain.value = this.muted?0:0.5; this.master.connect(c.destination);
+    this.sfxBus = c.createGain(); this.sfxBus.gain.value = 0.85; this.sfxBus.connect(this.master);
+    this.musBus = c.createGain(); this.musBus.gain.value = 0.26; this.musBus.connect(this.master);
+    var n = Math.floor(c.sampleRate*1.2), buf = c.createBuffer(1,n,c.sampleRate), d = buf.getChannelData(0);
+    for(var i=0;i<n;i++) d[i] = Math.random()*2-1;
+    this.noise = buf;
+    this.humGain = c.createGain(); this.humGain.gain.value = 0; this.humGain.connect(this.sfxBus);
+    this.humFilt = c.createBiquadFilter(); this.humFilt.type='lowpass'; this.humFilt.frequency.value=520; this.humFilt.Q.value=6;
+    this.humFilt.connect(this.humGain);
+    this.hum = c.createOscillator(); this.hum.type='sawtooth'; this.hum.frequency.value=62; this.hum.connect(this.humFilt);
+    this.hum2 = c.createOscillator(); this.hum2.type='sine'; this.hum2.frequency.value=124; this.hum2.connect(this.humFilt);
+    try{ this.hum.start(); this.hum2.start(); }catch(e){}
+    this.ready = true;
+  },
+  resume:function(){ if(this.ctx && this.ctx.state==='suspended'){ try{ this.ctx.resume(); }catch(e){} } },
+  ducked:false,
+  setMute:function(m){
+    this.muted = m; store('mgn.mute', m?'1':'0');
+    this.applyGain();
+  },
+  /* CrazyGames requires the game to be silent for the duration of a video ad.
+     Ducking is separate from mute so restoring audio afterwards cannot
+     clobber what the player actually chose. */
+  duck:function(on){ this.ducked = !!on; this.applyGain(); },
+  applyGain:function(){
+    if(!this.master || !this.ctx) return;
+    this.master.gain.setTargetAtTime((this.muted||this.ducked)?0:0.5, this.ctx.currentTime, 0.03);
+  },
+  tone:function(f,dur,type,vol,f2,delay,bus){
+    if(!this.ctx||this.muted) return;
+    var c=this.ctx, t=c.currentTime+(delay||0);
+    var o=c.createOscillator(); o.type=type||'square';
+    o.frequency.setValueAtTime(f,t);
+    if(f2) o.frequency.exponentialRampToValueAtTime(Math.max(24,f2), t+dur);
+    var g=c.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(vol===undefined?0.25:vol, t+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(bus||this.sfxBus);
+    try{ o.start(t); o.stop(t+dur+0.03); }catch(e){}
+  },
+  hit:function(dur,vol,freq,q,delay){
+    if(!this.ctx||this.muted) return;
+    var c=this.ctx, t=c.currentTime+(delay||0);
+    var s=c.createBufferSource(); s.buffer=this.noise; s.loop=true;
+    var f=c.createBiquadFilter(); f.type='bandpass'; f.frequency.setValueAtTime(freq,t); f.Q.value=q||1.2;
+    f.frequency.exponentialRampToValueAtTime(Math.max(90,freq*0.28), t+dur);
+    var g=c.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    s.connect(f); f.connect(g); g.connect(this.sfxBus);
+    try{ s.start(t); s.stop(t+dur+0.03); }catch(e){}
+  },
+  setHum:function(v,pitch){
+    if(!this.ctx||!this.humGain) return;
+    var t=this.ctx.currentTime;
+    this.humGain.gain.setTargetAtTime(this.muted?0:v*0.15, t, 0.06);
+    this.humFilt.frequency.setTargetAtTime(360+pitch*900, t, 0.08);
+    this.hum.frequency.setTargetAtTime(58+pitch*26, t, 0.10);
+  },
+
+  sBlast:function(p){
+    this.hit(0.30+p*0.16, 0.30, 1500+p*900, 0.9);
+    this.tone(360+p*70, 0.26, 'sawtooth', 0.16, 70);
+    this.tone(120, 0.22, 'sine', 0.30, 44);
+  },
+  sPop:function(combo){
+    var f = 420 + Math.min(combo,14)*46;
+    this.tone(f, 0.10, 'square', 0.13, f*1.7);
+    this.hit(0.09, 0.15, 2600, 1.4);
+  },
+  sBig:function(){ this.hit(0.5,0.32,900,0.7); this.tone(150,0.5,'sawtooth',0.20,40); },
+  sCatch:function(){ this.tone(880,0.09,'triangle',0.15,1500); },
+  sPull:function(){ this.tone(1150,0.05,'sine',0.05,1800); },
+  sHurt:function(){ this.tone(180,0.42,'sawtooth',0.30,48); this.hit(0.36,0.28,700,0.5); },
+  sLevel:function(){ var n=[523,659,784,1046]; for(var i=0;i<4;i++) this.tone(n[i],0.30,'triangle',0.17,null,i*0.075); },
+  /* A distinct sting when an epic is in the hand - you should hear it before
+     you have finished reading the cards. */
+  sEpic:function(){
+    var n=[523,659,784,1046,1318];
+    for(var i=0;i<5;i++) this.tone(n[i],0.42,'triangle',0.17,null,i*0.07);
+    this.tone(196,0.80,'sawtooth',0.11,98,0.02);
+    this.tone(1568,0.60,'sine',0.09,null,0.30);
+  },
+  sWave:function(){ this.tone(392,0.16,'triangle',0.15); this.tone(587,0.30,'triangle',0.15,null,0.11); },
+  sBoss:function(){ this.tone(90,1.1,'sawtooth',0.25,40); this.hit(0.9,0.20,420,0.6); },
+  sUi:function(){ this.tone(700,0.06,'square',0.10,900); },
+  sDead:function(){ this.tone(300,1.3,'sawtooth',0.26,36); this.hit(1.0,0.22,600,0.5); },
+  sHeal:function(){ var n=[659,880,1174]; for(var i=0;i<3;i++) this.tone(n[i],0.24,'sine',0.16,null,i*0.06); },
+
+  ROOTS:[0,0,-4,3],
+  tick:function(){
+    if(!this.ctx || this.muted || this.ducked){ this.musT = 0; return; }
+    var spb=60/126, six=spb/4, c=this.ctx;
+    if(this.musT===0) this.musT = c.currentTime+0.12;
+    var guard=0;
+    while(this.musT < c.currentTime+0.18 && guard++<64){
+      this.stepAt(this.step, this.musT);
+      this.step++;
+      if(this.step>=16){ this.step=0; this.bar=(this.bar+1)%4; }
+      this.musT += six;
+    }
+  },
+  stepAt:function(s,t){
+    var c=this.ctx, root=110*Math.pow(2, this.ROOTS[this.bar]/12);
+    var inten = clamp((G.wave-1)/14, 0, 1);
+    if(s%4===0){
+      var o=c.createOscillator(); o.type='sine';
+      o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(44,t+0.14);
+      var g=c.createGain(); g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.20);
+      o.connect(g); g.connect(this.musBus); try{ o.start(t); o.stop(t+0.24); }catch(e){}
+    }
+    if(s%4===2){
+      var sh=c.createBufferSource(); sh.buffer=this.noise; sh.loop=true;
+      var f=c.createBiquadFilter(); f.type='highpass'; f.frequency.value=7200;
+      var gg=c.createGain(); gg.gain.setValueAtTime(0.09+0.06*inten,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+      sh.connect(f); f.connect(gg); gg.connect(this.musBus); try{ sh.start(t); sh.stop(t+0.07); }catch(e){}
+    }
+    var arp=[0,7,12,7,3,10,15,10];
+    if(s%2===0){
+      var f2 = root*Math.pow(2, arp[(s/2)%8]/12);
+      var o2=c.createOscillator(); o2.type='sawtooth'; o2.frequency.setValueAtTime(f2,t);
+      var lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(700+1900*inten,t); lp.Q.value=5;
+      var g2=c.createGain();
+      g2.gain.setValueAtTime(0.0001,t);
+      g2.gain.linearRampToValueAtTime(0.12,t+0.01);
+      g2.gain.exponentialRampToValueAtTime(0.0001,t+0.20);
+      o2.connect(lp); lp.connect(g2); g2.connect(this.musBus);
+      try{ o2.start(t); o2.stop(t+0.24); }catch(e){}
+    }
+    if(s===0){
+      var ob=c.createOscillator(); ob.type='triangle'; ob.frequency.setValueAtTime(root/2,t);
+      var gb=c.createGain(); gb.gain.setValueAtTime(0.0001,t);
+      gb.gain.linearRampToValueAtTime(0.20,t+0.02); gb.gain.exponentialRampToValueAtTime(0.0001,t+0.7);
+      ob.connect(gb); gb.connect(this.musBus); try{ ob.start(t); ob.stop(t+0.75); }catch(e){}
+    }
+  }
+};

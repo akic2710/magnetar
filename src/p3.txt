@@ -1,0 +1,504 @@
+
+/* -------------------------------- effects ------------------------------ */
+function spark(x,y,n,col,spdA,spdB,lifeA,lifeB,size){
+  for(var i=0;i<n;i++){
+    var a=rnd(0,TAU), s=rnd(spdA,spdB);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rnd(lifeA,lifeB),max:0,r:size||3,col:col,drag:2.6});
+    parts[parts.length-1].max = parts[parts.length-1].life;
+  }
+}
+function popText(x,y,txt,col,size){
+  pops.push({x:x,y:y,txt:txt,col:col||C.text,life:0.9,max:0.9,size:size||22,vy:-42});
+}
+function ring(x,y,max,col,life,w){
+  waves.push({x:x,y:y,r:6,max:max,life:life||0.45,col:col,w:w||3});
+}
+function shakeIt(v){ G.shake = Math.min(34, G.shake+v); }
+
+/* --------------------------- orbit + magnet ---------------------------- */
+function orbitCount(){ return orbit.length; }
+
+function captureInto(kind, x, y, r){
+  if(orbit.length >= P.cap) return false;
+  orbit.push({kind:kind, ang:0, cur:len(x-P.x,y-P.y), r:r, x:x, y:y, spin:rnd(-4,4), t:0});
+  redistribute();
+  return true;
+}
+function redistribute(){
+  var n = orbit.length;
+  for(var i=0;i<n;i++) orbit[i].slot = i;
+}
+
+function doBlast(){
+  var n = orbit.length;
+  P.blastCool = 0.06;
+  if(n===0){
+    // tiny courtesy pulse so the verb always answers
+    ring(P.x,P.y,52,'rgba(124,243,255,0.5)',0.22,2);
+    A.tone(520,0.06,'sine',0.05,760);
+    return;
+  }
+  for(var i=0;i<n;i++){
+    var o = orbit[i];
+    var ang = P.orbBase + (o.slot||0)*TAU/n;
+    var sp = P.blastSpd * (o.kind==='bolt'?1.12:1);
+    shots.push({
+      x:P.x+Math.cos(ang)*P.orbR, y:P.y+Math.sin(ang)*P.orbR,
+      vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp,
+      r:o.kind==='bolt'?8:6,
+      dmg:(o.kind==='bolt'?3:1) + (P.dmg-1),
+      pierce:(o.kind==='bolt'?2:1) + (P.pierce-1),
+      bounce:P.bounce, kind:o.kind, life:2.6, a:rnd(0,TAU), hitIds:[]
+    });
+  }
+  orbit.length = 0;
+  var power = clamp(n/8, 0, 1.6);
+  A.sBlast(power);
+  shakeIt(3 + power*7);
+  G.pulse = Math.min(1, 0.35 + power*0.5);
+  ring(P.x, P.y, 90+power*70, 'rgba(157,251,255,0.55)', 0.34, 3);
+  spark(P.x,P.y, 6+Math.round(power*8), C.shot, 120, 420, 0.18, 0.4, 3);
+  if(P.repulse>0){
+    shots.push({shock:true, x:P.x, y:P.y, r:10, max:120+P.repulse*46, dmg:P.repulse, life:0.34, hitIds:[]});
+  }
+  if(G.mode==='intro' && n>=2) G.introBlasted = true;
+}
+
+/* ------------------------------- combat -------------------------------- */
+function damageEnemy(e, dmg, fx, fy){
+  if(e.dead) return;
+  e.hp -= dmg;
+  e.flash = 0.12;
+  if(e.type!=='brute' && e.type!=='boss'){
+    e.vx += (fx||0)*0.35; e.vy += (fy||0)*0.35;
+  }
+  if(e.hp<=0){ killEnemy(e); }
+  else {
+    spark(e.x,e.y,3,e.col,60,200,0.12,0.26,2.4);
+    A.sPop(0);
+  }
+}
+
+function killEnemy(e){
+  e.dead = true;
+  G.kills++;
+  G.combo++; G.comboT = 2.6;
+  if(G.combo > G.bestCombo) G.bestCombo = G.combo;
+  var mult = 1 + (G.combo-1)*0.12;
+  var pts = Math.round(e.sc * mult);
+  G.score += pts;
+  G.xp += e.xp;
+  if(G.combo>2) popText(e.x, e.y-8, '+'+pts, C.scrap, 20);
+
+  spark(e.x, e.y, e.type==='boss'?60:(10+Math.round(e.r*0.6)), e.col, 90, 340+e.r*6, 0.25, 0.7, 3.4);
+  ring(e.x, e.y, e.r*3.2, e.col, 0.36, 2.5);
+  A.sPop(G.combo);
+  G.hitStop = Math.max(G.hitStop, e.type==='boss'?0.22:0.035);
+  shakeIt(e.type==='boss'?26:(e.type==='brute'?9:3));
+
+  var drops = e.type==='boss'?14:(e.type==='brute'?5:(e.type==='splitter'?4:2));
+  for(var i=0;i<drops;i++){
+    var a=rnd(0,TAU), d=rnd(10,e.r+16);
+    scrap.push({x:e.x+Math.cos(a)*d, y:e.y+Math.sin(a)*d, vx:Math.cos(a)*rnd(40,150), vy:Math.sin(a)*rnd(40,150), r:rnd(5,8), a:rnd(0,TAU), sp:rnd(-3,3), life:0});
+  }
+  if(e.type==='splitter'){
+    for(var k=0;k<3;k++){
+      var an = k*TAU/3 + rnd(0,1);
+      var s = spawnAt('drone', {x:clamp(e.x+Math.cos(an)*36,30,VW-30), y:clamp(e.y+Math.sin(an)*36,30,VH-30)});
+      s.spawnA = 0.18;
+    }
+  }
+  if(e.type==='boss'){
+    G.bossRef=null; A.sBig(); G.flash=0.6; G.chroma=1;
+    if(window.CG) window.CG.happytime();
+    popText(e.x, e.y-30, 'GUARDIAN DOWN', C.scrap, 30);
+  }
+  P.killsSinceHeal++;
+  // Capped at one heal per wave: unbounded kill-based sustain made a
+  // fully-upgraded player literally unkillable in long runs.
+  if(P.siphon>0 && !G.healedThisWave && P.killsSinceHeal >= 30/P.siphon){
+    P.killsSinceHeal = 0; G.healedThisWave = true;
+    if(P.hp < P.maxHp){ P.hp++; A.sHeal(); popText(P.x,P.y-34,'+1 LIFE','#78ffa8',22); ring(P.x,P.y,90,'rgba(120,255,168,0.6)',0.5,3); }
+  }
+  checkLevel();
+}
+
+function hurtPlayer(){
+  if(P.inv>0 || G.mode!=='play' && G.mode!=='intro') return;
+  P.hp--;
+  P.inv = 1.35;
+  G.combo = 0;
+  G.dmgFlash = 1;
+  A.sHurt();
+  shakeIt(20);
+  G.hitStop = Math.max(G.hitStop, 0.11);
+  spark(P.x,P.y,22,'#ff5566',90,380,0.25,0.6,3.5);
+  ring(P.x,P.y,140,'rgba(255,80,100,0.7)',0.5,4);
+  // drop half the orbit on hit
+  var drop = Math.floor(orbit.length/2);
+  for(var i=0;i<drop;i++) orbit.pop();
+  redistribute();
+  if(P.hp<=0) die();
+}
+
+var REVIVE_SECONDS = 8;
+
+/* Death is now only the start of the end-of-run sequence:
+     die -> [revive offer] -> finishRun -> [midgame ad] -> game over
+   Payout lives in finishRun, not here, so a revived run is not paid twice. */
+function die(){
+  if(G.ended) return;
+  G.ended = true;
+  G.mode = 'dying';
+  G.deathT = 0;
+  G.postDeath = false;
+  A.sDead();
+  A.setHum(0,0);
+  shakeIt(30); G.flash=0.8;
+  spark(P.x,P.y,70,C.player,120,520,0.4,1.1,4);
+  ring(P.x,P.y,260,hexA(C.player,0.7),0.8,5);
+  if(window.CG) window.CG.gameplayStop();
+}
+
+/* Only offer a revive on a run worth saving, once per run, and never when we
+   know the request cannot succeed - a button that can never work is a
+   CrazyGames rejection cause. */
+function reviveAvailable(){
+  return !!(window.CG && window.CG.ready && window.CG.adsOk && !G.revived && G.wave >= 3);
+}
+/* The SDK enforces its own 3-minute midgame cap, so this only adds the rules
+   it cannot know: not after a trivially short run, and never a second ad in a
+   run where the player already sat through a rewarded one. */
+function midgameEligible(){
+  // One ad opportunity per run. If the player already engaged with the
+  // rewarded offer - watched it OR had it fail on them - do not follow it
+  // with a second request. Chaining ads is against the ad requirements and
+  // is a miserable thing to do to someone who just died.
+  return !!(window.CG && window.CG.ready && window.CG.adsOk &&
+            !G.watchedAd && !G.adAttempted && G.t >= 45);
+}
+
+function afterDeath(){
+  if(reviveAvailable()){ G.mode = 'revive'; G.reviveT = REVIVE_SECONDS; }
+  else finishRun();
+}
+
+function showOver(){ G.mode = 'over'; G.overT = 0; }
+
+function finishRun(){
+  if(G.runFinished){ showOver(); return; }
+  G.runFinished = true;
+
+  G.fluxEarned = fluxFor(G.score, G.wave);
+  addFlux(G.fluxEarned);
+  var best = parseInt(store('mgn.best')||'0',10);
+  if(G.score > best){ store('mgn.best', String(G.score)); G.newBest = true; }
+  var bw = parseInt(store('mgn.bestwave')||'0',10);
+  if(G.wave > bw) store('mgn.bestwave', String(G.wave));
+  if(G.newBest && window.CG) window.CG.happytime();
+  if(window.CG) window.CG.gameplayStop();
+
+  // Death is an allowed midgame placement; the panel appears when it is done.
+  if(midgameEligible()) window.CG.requestAd('midgame', showOver, showOver);
+  else showOver();
+}
+
+function takeRevive(){
+  if(G.adBusy || G.revived || G.mode!=='revive') return;
+  G.adAttempted = true;
+  window.CG.requestAd('rewarded', doRevive, function(code){
+    // Never reward on adError - the run simply ends.
+    G.adMsg = (code==='unfilled') ? 'NO AD AVAILABLE RIGHT NOW' : 'AD UNAVAILABLE';
+    G.adMsgT = 2.2;
+    finishRun();
+  });
+}
+
+function doRevive(){
+  G.revived = true;
+  G.watchedAd = true;
+  G.ended = false;
+  G.postDeath = false;
+  G.mode = 'play';
+  P.hp = Math.max(1, Math.min(2, P.maxHp));
+  P.inv = 3.0;
+  bolts.length = 0;
+  clearArea(300);
+  A.sHeal();
+  G.flash = 0.7;
+  shakeIt(18);
+  ring(P.x, P.y, 340, hexA(C.player,0.8), 0.8, 6);
+  popText(P.x, P.y-46, 'REVIVED', C.player, 30);
+  if(window.CG) window.CG.gameplayStart();
+}
+
+/* Buys breathing room, not points. Watching an ad must never move the
+   scoreboard or the leaderboard stops meaning anything. */
+function clearArea(r){
+  for(var i=enemies.length-1;i>=0;i--){
+    var e = enemies[i];
+    var d = Math.max(1, len(e.x-P.x, e.y-P.y));
+    if(e.type==='boss'){
+      e.vx += (e.x-P.x)/d*280; e.vy += (e.y-P.y)/d*280;
+      continue;
+    }
+    if(d < r){
+      spark(e.x, e.y, 10, e.col, 90, 300, 0.2, 0.5, 3);
+      enemies.splice(i,1);
+    }
+  }
+}
+
+function restart(){
+  reset();
+  G.mode = store('mgn.played')==='1' ? 'play' : 'intro';
+  if(G.mode==='play' && G.wave===0) startWave(1);
+  A.sUi();
+  if(window.CG) window.CG.gameplayStart();
+}
+
+function togglePause(){
+  if(G.mode!=='play') return;
+  G.paused = !G.paused;
+  A.sUi();
+}
+
+/* ------------------------------ level ups ------------------------------ */
+function checkLevel(){
+  if(G.xp < G.xpNeed) return;
+  G.xp -= G.xpNeed;
+  G.level++;
+  G.xpNeed = Math.round(9 + G.level*4.6);
+  openLevelUp();
+}
+/* Weighted draw without replacement: each slot is rolled against the weights
+   of whatever is still in the pool, so a hand can hold at most one of a given
+   upgrade and epics stay scarce even when few cards remain unmaxed. */
+function openLevelUp(){
+  var pool = [], i;
+  for(i=0;i<UPGRADES.length;i++){
+    var u = UPGRADES[i];
+    if(((G.taken && G.taken[u.id]) || 0) < u.max) pool.push(u);
+  }
+  if(!pool.length) return;
+
+  var picked = [], best = 0;
+  while(picked.length < 3 && pool.length){
+    var total = 0, j;
+    for(j=0;j<pool.length;j++) total += RARITY[pool[j].r].w;
+    var roll = Math.random()*total, chosen = pool.length-1;
+    for(j=0;j<pool.length;j++){
+      roll -= RARITY[pool[j].r].w;
+      if(roll <= 0){ chosen = j; break; }
+    }
+    if(pool[chosen].r > best) best = pool[chosen].r;
+    picked.push(pool[chosen]);
+    pool.splice(chosen,1);
+  }
+
+  G.cards = picked;
+  G.bestRarity = best;
+  G.mode = 'levelup';
+  G.cardT = 0;
+  if(best >= EPIC) A.sEpic(); else A.sLevel();
+  G.flash = 0.35 + best*0.12;
+}
+function chooseUpgrade(i){
+  if(G.mode!=='levelup') return;
+  var u = G.cards[i];
+  if(!u) return;
+  if(!G.taken) G.taken = {};
+  G.taken[u.id] = (G.taken[u.id]||0)+1;
+  u.ap();
+  G.mode = 'play';
+  G.cards = [];
+  A.sUi();
+  var rc = RARITY[u.r].col;
+  ring(P.x,P.y,150,hexA(rc,0.7),0.55,4);
+  popText(P.x, P.y-40, u.name, rc, 24);
+}
+
+/* -------------------------------- update ------------------------------- */
+function update(dt){
+  G.t += dt;
+
+  /* ---- timers / global fx ---- */
+  G.shake = Math.max(0, G.shake - G.shake*7*dt - 12*dt);
+  G.flash = Math.max(0, G.flash - dt*2.4);
+  G.pulse = Math.max(0, G.pulse - dt*2.2);
+  G.chroma = Math.max(0, G.chroma - dt*1.4);
+  G.dmgFlash = Math.max(0, G.dmgFlash - dt*1.8);
+  G.waveBanner = Math.max(0, G.waveBanner - dt);
+  if(G.comboT>0){ G.comboT-=dt; if(G.comboT<=0) G.combo=0; }
+  P.inv = Math.max(0, P.inv-dt);
+  P.blastCool = Math.max(0, P.blastCool-dt);
+
+  var alive = (G.mode==='play' || G.mode==='intro' || G.mode==='levelup');
+
+  /* ---- intro script ---- */
+  if(G.mode==='intro'){
+    G.introT += dt;
+    if(G.introStep===0 && G.introT>2.1){ G.introStep=1; G.introT=0; }
+    if(G.introStep===1 && (G.introPulled || G.introT>7)){ G.introStep=2; G.introT=0; }
+    if(G.introStep===2 && (G.introBlasted || G.introT>7)){
+      G.introStep=3; G.introT=0;
+      // give the player something to shoot before wave 1 starts
+      for(var q=0;q<3;q++) spawnAt('drone', edgePoint());
+    }
+    if(G.introStep===3 && G.introT>1.4){
+      G.introStep=4; store('mgn.played','1');
+      G.mode='play'; startWave(1);
+    }
+  }
+
+  /* ---- player movement ---- */
+  var kv = keyVector();
+  var tx=P.x, ty=P.y, useKeys = kv[2];
+  var magHeld = (IN.down || IN.kMag) && alive && G.mode!=='levelup';
+
+  var maxSpd = P.spd * (magHeld ? P.holdMul : 1);
+  var dvx, dvy;
+  if(!alive){
+    dvx = 0; dvy = 0;
+  } else if(useKeys){
+    dvx = kv[0]*maxSpd; dvy = kv[1]*maxSpd;
+  } else if(IN.has){
+    var ddx = IN.x-P.x, ddy = IN.y-P.y, dd = len(ddx,ddy);
+    if(dd < 4){ dvx=0; dvy=0; }
+    else {
+      var want = Math.min(maxSpd, dd*7.5);
+      dvx = ddx/dd*want; dvy = ddy/dd*want;
+    }
+  } else { dvx=0; dvy=0; }
+
+  var k = 1-Math.exp(-15*dt);
+  P.vx += (dvx-P.vx)*k;
+  P.vy += (dvy-P.vy)*k;
+  P.x += P.vx*dt; P.y += P.vy*dt;
+
+  var pad = P.r+4;
+  if(P.x<pad){ P.x=pad; P.vx*=-0.3; }
+  if(P.x>VW-pad){ P.x=VW-pad; P.vx*=-0.3; }
+  if(P.y<pad){ P.y=pad; P.vy*=-0.3; }
+  if(P.y>VH-pad){ P.y=VH-pad; P.vy*=-0.3; }
+
+  /* ---- magnet + orbit ---- */
+  P.orbBase = (P.orbBase||0) + (P.omega + orbit.length*0.02)*dt;
+  var fill = orbit.length/Math.max(1,P.cap);
+  A.setHum(magHeld?(0.35+fill*0.65):0, fill);
+
+  if(magHeld){
+    var pull = 1250*P.pullMul;
+    for(var i=0;i<scrap.length;i++){
+      var s = scrap[i];
+      var dx=P.x-s.x, dy=P.y-s.y, d=len(dx,dy);
+      if(d < P.magR && d>0.01){
+        var f = pull*(1 - d/P.magR*0.55)/Math.max(28,d);
+        s.vx += dx*f*dt; s.vy += dy*f*dt;
+        s.vx *= (1-1.6*dt); s.vy *= (1-1.6*dt);
+        if(d < P.orbR+12 && orbit.length<P.cap){
+          captureInto('scrap', s.x, s.y, s.r);
+          scrap.splice(i,1); i--;
+          A.sPull();
+          G.introPulled = true;
+          continue;
+        }
+      }
+    }
+    for(var b=0;b<bolts.length;b++){
+      var bo = bolts[b];
+      if(bo.mag===false) continue;   // lancer spikes cannot be caught
+      var bx=P.x-bo.x, by=P.y-bo.y, bd=len(bx,by);
+      if(bd < P.magR*1.05 && bd>0.01){
+        var bf = pull*1.15*(1 - bd/(P.magR*1.05)*0.5)/Math.max(28,bd);
+        bo.vx += bx*bf*dt; bo.vy += by*bf*dt;
+        bo.vx *= (1-2.2*dt); bo.vy *= (1-2.2*dt);
+        if(bd < P.orbR+12 && orbit.length<P.cap){
+          captureInto('bolt', bo.x, bo.y, 8);
+          bolts.splice(b,1); b--;
+          A.sCatch();
+          spark(bo.x,bo.y,5,C.bolt,60,180,0.12,0.3,2.4);
+          G.introPulled = true;
+          continue;
+        }
+      }
+    }
+  }
+
+  // orbit item positions + grind damage
+  var n = orbit.length;
+  for(var oi=0; oi<n; oi++){
+    var o = orbit[oi];
+    o.t += dt;
+    o.spinA = (o.spinA||0) + o.spin*dt;
+    var ang = P.orbBase + (o.slot||0)*TAU/n;
+    o.cur = o.cur + (P.orbR-o.cur)*(1-Math.exp(-14*dt));
+    o.x = P.x + Math.cos(ang)*o.cur;
+    o.y = P.y + Math.sin(ang)*o.cur;
+  }
+  if(n>0){
+    for(var ei=0; ei<enemies.length; ei++){
+      var en = enemies[ei];
+      if(en.dead || en.spawnA>0) continue;
+      for(var oj=orbit.length-1; oj>=0; oj--){
+        var ob = orbit[oj];
+        if(len(en.x-ob.x, en.y-ob.y) < en.r+ob.r+2){
+          damageEnemy(en, P.orbDmg + (ob.kind==='bolt'?1:0), 0, 0);
+          spark(ob.x,ob.y,4,C.shot,60,220,0.1,0.25,2.6);
+          orbit.splice(oj,1); redistribute();
+          n = orbit.length;
+          break;
+        }
+      }
+    }
+  }
+
+  // static charge
+  if(P.stat>0 && orbit.length>0){
+    P.statT -= dt;
+    if(P.statT<=0){
+      P.statT = 1.05/P.stat;
+      var best=null, bestD=1e9;
+      for(var si=0; si<enemies.length; si++){
+        var se=enemies[si];
+        if(se.dead||se.spawnA>0) continue;
+        var sd=len(se.x-P.x, se.y-P.y);
+        if(sd<300 && sd<bestD){ bestD=sd; best=se; }
+      }
+      if(best){
+        zaps.push({x1:P.x,y1:P.y,x2:best.x,y2:best.y,life:0.16,max:0.16});
+        damageEnemy(best, P.stat+1, 0, 0);   // epic: scales with stacks
+        A.tone(1400,0.07,'square',0.07,600);
+      }
+    }
+  }
+
+  if(IN.justUp){
+    if(IN.swallow) IN.swallow = false;
+    else if(alive && G.mode!=='levelup') doBlast();
+  }
+  IN.justUp=false; IN.justDown=false;
+
+  /* ---- scrap field ---- */
+  for(var s2=0; s2<scrap.length; s2++){
+    var sc = scrap[s2];
+    sc.x += sc.vx*dt; sc.y += sc.vy*dt;
+    sc.vx *= (1-0.7*dt); sc.vy *= (1-0.7*dt);
+    sc.a += sc.sp*dt;
+    if(sc.x<12){sc.x=12;sc.vx=Math.abs(sc.vx)*0.6;}
+    if(sc.x>VW-12){sc.x=VW-12;sc.vx=-Math.abs(sc.vx)*0.6;}
+    if(sc.y<12){sc.y=12;sc.vy=Math.abs(sc.vy)*0.6;}
+    if(sc.y>VH-12){sc.y=VH-12;sc.vy=-Math.abs(sc.vy)*0.6;}
+  }
+  if(scrap.length < G.scrapCap){
+    G.scrapT = (G.scrapT||0) - dt;
+    if(G.scrapT<=0){ G.scrapT = 0.35/P.pullMul; addScrap(false); }
+  }
+  while(scrap.length > G.scrapCap+30) scrap.shift();
+
+  updateEnemies(dt);
+  updateBolts(dt);
+  updateShots(dt);
+  updateWaveFlow(dt);
+  updateParticles(dt);
+}

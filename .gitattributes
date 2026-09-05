@@ -1,0 +1,4 @@
+# build.mjs does exact-string transforms on src/, and a CRLF working copy once
+# silently half-applied the test build (it stayed valid JS, so node --check
+# passed). Keep every tracked text file LF regardless of core.autocrlf.
+* text=auto eol=lf
