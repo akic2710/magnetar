@@ -40,7 +40,8 @@ it throws at you is also the ammunition you kill it with.</sub>
 
 | | |
 |---|---|
-| <img src="docs/screenshot-mobile.webp" width="230" alt="The game on a 375x667 phone screen in portrait: the 16:9 playfield letterboxed into a narrow strip with large black bars above and below"> | **Portrait on a phone.** The arena is a fixed 16:9 field scaled to fit, so a 375×667 portrait screen gets a 375×211 strip — **32% of the display**, with 228px of black above and below. Everything stays functional and correctly laid out, but it is small. Landscape is the intended orientation: the same phone turned sideways gives the playfield the full 667px width, roughly double the scale. |
+| <img src="docs/screenshot-mobile.webp" width="215" alt="The game on a 375x667 phone screen in portrait: the 16:9 playfield letterboxed into a narrow strip with large black bars above and below"> | <img src="docs/screenshot-rotate.webp" width="215" alt="The rotate prompt: an animated phone turning from portrait to landscape under a sweeping arrow, with ROTATE YOUR DEVICE and a Play anyway button"> |
+| **Portrait without the prompt.** The arena is a fixed 16:9 field scaled to fit, so a 375×667 screen would get a 375×211 strip — **32% of the display**. Landscape gives the playfield the full width, roughly double the scale. | **So the game asks.** Shown only on touch devices in portrait, it pauses the run and covers the letterbox bars too. Always dismissable — orientation can be locked at the OS level, and nobody should ever be stuck. |
 
 ```
 dist/index.html    <- the submission build (standalone, no dependencies)

@@ -24,8 +24,14 @@ var C = {
 /* -------------------------------- input -------------------------------- */
 var IN = {
   x:VW/2, y:VH/2, down:false, justDown:false, justUp:false, has:false,
-  keys:{}, kx:0, ky:0, kMag:false, anyKey:false, clickX:0, clickY:0, clicked:false
+  keys:{}, kx:0, ky:0, kMag:false, anyKey:false, clickX:0, clickY:0, clicked:false,
+  cssX:0, cssY:0, clickCssX:0, clickCssY:0
 };
+
+/* Only prompt on something that can actually be rotated. A desktop window that
+   happens to be taller than it is wide should never be told to turn itself. */
+var TOUCH_CAPABLE = ('ontouchstart' in window) || ((navigator.maxTouchPoints|0) > 0);
+var rotateDismissed = false;
 
 function toWorld(cx,cy){
   return { x: clamp((cx-offX)/scale, -80, VW+80), y: clamp((cy-offY)/scale, -80, VH+80) };
@@ -33,12 +39,14 @@ function toWorld(cx,cy){
 function onDown(cx,cy){
   var p = toWorld(cx,cy);
   IN.x=p.x; IN.y=p.y; IN.has=true;
+  IN.cssX=cx; IN.cssY=cy; IN.clickCssX=cx; IN.clickCssY=cy;
   if(!IN.down){ IN.down=true; IN.justDown=true; }
   IN.clickX=p.x; IN.clickY=p.y; IN.clicked=true;
   boot();
 }
 function onMove(cx,cy){
   var p=toWorld(cx,cy); IN.x=p.x; IN.y=p.y;
+  IN.cssX=cx; IN.cssY=cy;
   if(!IN.has && !IN.isTouch){ IN.has=true; cv.className='reticle'; }
   IN.has=true;
 }

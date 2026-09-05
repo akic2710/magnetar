@@ -122,6 +122,14 @@ function render(rdt){
     ctx.fillStyle=gr; ctx.fillRect(0,0,VW,VH);
   }
   ctx.restore();
+
+  /* Drawn last and in CSS pixels rather than virtual ones, so it covers the
+     letterbox bars too - in portrait the playfield is only a third of the
+     screen, and a prompt confined to it would be the size of the problem. */
+  if(needsRotate()){
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    drawRotate();
+  }
 }
 
 function drawBackground(){
@@ -858,6 +866,79 @@ function drawCores(){
 }
 
 
+/* ---------------------------- rotate prompt ---------------------------- */
+/* The arena is a fixed 16:9 field scaled to fit, so a portrait phone gets a
+   letterboxed strip about a third of the screen tall. Ask for landscape - but
+   never trap anyone: orientation can be locked at the OS level, so the prompt
+   is always dismissable and the run continues underneath. */
+function needsRotate(){
+  if(!TOUCH_CAPABLE || rotateDismissed || G.adBusy) return false;
+  return cssH > cssW * 1.05;          // margin stops it flapping near square
+}
+
+/* One layout, used by both the drawing and the hit test. They were computed
+   from different origins before, which put the button on top of the title. The
+   unit is capped so a tablet does not scale the lockup off the bottom. */
+function rotateLayout(){
+  var u = Math.min(cssW, cssH) / 100;
+  var uc = Math.min(u, 5);
+  var cy = cssH/2 - 14*uc;
+  var bh = Math.max(40, 11*uc);
+  var bw = Math.min(cssW*0.62, 58*uc);
+  return { u:u, uc:uc, cy:cy,
+           titleY: cy + 46*uc,
+           subY:   cy + 57*uc,
+           btn: { x:(cssW-bw)/2, y:cy + 66*uc, w:bw, h:bh } };
+}
+function rotateBtn(){ return rotateLayout().btn; }
+
+function drawRotate(){
+  var L = rotateLayout(), uc = L.uc, cx = cssW/2, cy = L.cy;
+  ctx.fillStyle = 'rgba(3,5,14,0.94)';
+  ctx.fillRect(0, 0, cssW, cssH);
+
+  // phone turning from portrait to landscape, on a loop
+  var t = (G.uiT * 0.5) % 1;
+  var e = t < 0.45 ? 0 : (t < 0.7 ? (t-0.45)/0.25 : 1);
+  e = e*e*(3-2*e);                                   // smoothstep
+  var ang = -Math.PI/2 * e;
+  var pw = 15*uc, ph = 26*uc;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(ang);
+  ctx.fillStyle = hexA(C.player, 0.10);
+  roundRect(-pw, -ph, pw*2, ph*2, 3.2*uc); ctx.fill();
+  ctx.strokeStyle = C.player; ctx.lineWidth = Math.max(2, 0.7*uc);
+  roundRect(-pw, -ph, pw*2, ph*2, 3.2*uc); ctx.stroke();
+  ctx.strokeStyle = hexA(C.player, 0.30); ctx.lineWidth = Math.max(1, 0.35*uc);
+  roundRect(-pw*0.74, -ph*0.80, pw*1.48, ph*1.60, 1.4*uc); ctx.stroke();
+  ctx.restore();
+
+  // arc arrow sweeping the same quarter turn
+  var r = ph * 1.5;
+  ctx.strokeStyle = hexA(C.scrap, 0.85);
+  ctx.lineWidth = Math.max(2, 0.6*uc);
+  ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI*0.92, -Math.PI*0.30); ctx.stroke();
+  var ah = -Math.PI*0.30, ax = cx + Math.cos(ah)*r, ay = cy + Math.sin(ah)*r;
+  ctx.fillStyle = C.scrap;
+  ctx.save(); ctx.translate(ax, ay); ctx.rotate(ah + Math.PI/2);
+  ctx.beginPath();
+  ctx.moveTo(0, 2.2*uc); ctx.lineTo(-1.9*uc, -1.6*uc); ctx.lineTo(1.9*uc, -1.6*uc);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  text('ROTATE YOUR DEVICE', cx, L.titleY, Math.max(15, 5.2*uc), C.text, 'center', 900, 1, 0.22*uc);
+  text('Magnetar is built for landscape', cx, L.subY, Math.max(11, 2.9*uc), C.dim, 'center', 600, 0.8, 0.05*uc);
+
+  var b = L.btn;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  roundRect(b.x, b.y, b.w, b.h, b.h*0.28); ctx.fill();
+  ctx.strokeStyle = 'rgba(234,242,255,0.30)'; ctx.lineWidth = 2;
+  roundRect(b.x, b.y, b.w, b.h, b.h*0.28); ctx.stroke();
+  text('Play anyway', b.x + b.w/2, b.y + b.h/2, Math.max(12, 3.4*uc), C.dim, 'center', 700, 0.85, 0.5);
+}
+
 /* ------------------------------- banner -------------------------------- */
 /* Death screen only. The ad requirements forbid banners during gameplay and
    ask that they sit clear of the game's own buttons, so this lives in the
@@ -1075,6 +1156,17 @@ function handleUI(){
   IN.clicked = false;
   if(G.adBusy){ IN.swallow = true; return; }   // the overlay blocks everything
 
+  if(needsRotate()){
+    // Hit-tested in CSS pixels, because that is the space it was drawn in.
+    var rb = rotateBtn();
+    if(IN.clickCssX >= rb.x && IN.clickCssX <= rb.x+rb.w &&
+       IN.clickCssY >= rb.y && IN.clickCssY <= rb.y+rb.h){
+      rotateDismissed = true;
+    }
+    IN.swallow = true;   // never let a tap fall through to the game underneath
+    return;
+  }
+
   if(inRect(x,y,BTN_MUTE)){ A.setMute(!A.muted); A.sUi(); IN.swallow=true; return; }
   if(inRect(x,y,BTN_PAUSE)){ togglePause(); IN.swallow=true; return; }
 
@@ -1138,8 +1230,19 @@ function frame(now){
   handleUI();
   syncBanner();
 
+  // Rotating back to landscape offers the prompt again on a later flip.
+  if(cssW >= cssH) rotateDismissed = false;
+  var rot = needsRotate();
+  if(rot !== window.__rotWas){
+    window.__rotWas = rot;
+    if(window.CG){
+      if(rot) window.CG.gameplayStop();
+      else if(G.mode==='play' || G.mode==='intro') window.CG.gameplayStart();
+    }
+  }
+
   var sim = (G.mode==='play' || G.mode==='intro' || G.mode==='levelup' || G.mode==='dying');
-  if(G.paused || G.adBusy) sim = false;
+  if(G.paused || G.adBusy || rot) sim = false;
 
   if(G.mode==='dying'){
     G.deathT += rdt;
