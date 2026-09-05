@@ -9,6 +9,14 @@
 **Hold to pull, release to blast.** A one-button neon arena roguelite, built as a
 single self-contained HTML file for CrazyGames.
 
+![Magnetar gameplay: the player core at the centre of a dashed magnet field, ringed
+by nine captured objects including two caught enemy bolts, with drones, a spinner,
+a shooter, a splitter, a brute and a lancer closing in across a neon arena](docs/screenshot.webp)
+
+<sub>Wave 14. The yellow ring means the orbit is full — releasing now fires all nine
+outward as guided slugs. The dashed diagonal is a lancer's aim telegraph: its spike
+is the one projectile you cannot catch.</sub>
+
 ```
 dist/index.html    <- the submission build (standalone, no dependencies)
 game-body.html     <- same game as an Artifact-shaped fragment
