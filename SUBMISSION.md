@@ -128,11 +128,17 @@ two days, often with screenshots of anything they want changed.
 
 ---
 
-## One thing worth deciding first
+## Licensing note
 
-The repo is public and MIT licensed, which explicitly permits anyone to take
-this build and publish it. CrazyGames requires original IP from the submitter.
-That is not a conflict for *you* — you are the author — but it does mean
-someone else could submit a copy. Submitting sooner is the practical hedge; if
-you would rather close that off, switching to a source-available licence is a
-one-file change.
+The repository is public but licensed **[PolyForm Strict 1.0.0](LICENSE)** —
+source-available, read-only. Others may look at the code; they may not use,
+modify or redistribute it, which closes off the risk of someone publishing a
+copy of this build on a portal.
+
+That does not restrict you: you hold the copyright, so you can submit,
+monetise and relicense it however you like. The CrazyGames originality
+requirement is satisfied — you are the author.
+
+One caveat: earlier commits were published under MIT, and MIT cannot be
+revoked for the versions it covered. The window was brief, but anyone who took
+a copy during it keeps MIT rights to that snapshot.

@@ -5,7 +5,7 @@
 [![Build](https://img.shields.io/badge/build-104_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
-[![License](https://img.shields.io/badge/license-MIT-b9c7de?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
 
 **Hold to pull, release to blast.** A one-button neon arena roguelite, built as a
 single self-contained HTML file for CrazyGames.
@@ -489,10 +489,22 @@ Still worth adding before launch:
 
 ## License
 
-[MIT](LICENSE) — © 2026 Akic2. Take it, learn from it, build on it.
+[PolyForm Strict 1.0.0](LICENSE) — © 2026 Akic2. Source-available, not open source.
 
-Two things the licence does **not** cover, because copyright and trademark are
-separate: the name *Magnetar* and any branding around it. The code, the
-procedural art and the synthesised audio are all yours to reuse; if you ship
-something built on this, please give it its own name rather than publishing a
-second game called Magnetar.
+The source is here to be **read**. The licence does not grant permission to
+use, modify, or redistribute it: no forks, no derivative games, no publishing
+a build anywhere. Noncommercial personal use — running it locally, studying
+how it works — is permitted; anything beyond that is not.
+
+Copyright and trademark are separate, and the name *Magnetar* is not part of
+any grant either.
+
+**This is not retroactive.** Earlier commits published this project under MIT,
+and MIT is irrevocable for the versions it covered. Anyone who obtained the
+code during that window keeps MIT rights *to that version* permanently. This
+licence governs the current and future state of the repository. The MIT window
+was short and the repository had just gone public, so the practical exposure
+is small — but it is not zero, and rewriting history would not change it,
+because a granted licence cannot be withdrawn by deleting the commit.
+
+If you want to do something the licence does not allow, ask.
