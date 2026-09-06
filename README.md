@@ -1,6 +1,6 @@
 # Magnetar
 
-[![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-13%2F13_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
+[![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
 [![Build](https://img.shields.io/badge/build-110_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
@@ -268,7 +268,8 @@ as noise; the 15-run means above are the trustworthy figure. Tuning lives in
 ## CrazyGames submission checklist
 
 Every box below was verified in this repo, most of them by scripted geometry or
-bot runs rather than by eye. The badge counts these thirteen.
+bot runs rather than by eye. The badge counts these twelve, which are the
+requirements CrazyGames documents.
 
 - [x] **Gameplay in ≤1 click** — loads straight into a playable tutorial wave; no menu, no splash
 - [x] **Onboarding inside gameplay** — 3-step scripted intro, visual not textual, auto-skipped for returning players
@@ -277,7 +278,6 @@ bot runs rather than by eye. The badge counts these thirteen.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad
 - [x] **Download size** — 110 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
@@ -295,6 +295,12 @@ bot runs rather than by eye. The badge counts these thirteen.
 - [x] Banners on menus only (death screen, core menu), never during play
 - [x] Banner clear of the game's buttons; click-anywhere disabled while one is on screen
 - [x] Playable with an adblocker — the revive button is hidden rather than dead
+
+### Beyond the requirements
+
+Not documented requirements, but things QA and players notice.
+
+- [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad
 
 ### Confirm on your first upload
 
