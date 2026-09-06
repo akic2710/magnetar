@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-111_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-130_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -37,6 +37,12 @@ it throws at you is also the ammunition you kill it with.</sub>
 |---|---|
 | [![Upgrade cards, one of each rarity tier: a steel-bordered common, a cyan rare, and a violet epic carrying an outer bloom](docs/screenshot-levelup.webp)](docs/screenshot-levelup.webp) | [![The core menu: six starting cores in a grid, one equipped, two owned, one affordable and two locked behind higher Flux costs](docs/screenshot-cores.webp)](docs/screenshot-cores.webp) |
 | One card per tier. Colour, label, icon and the epic's bloom all carry the rarity, and the LEVEL header tints violet when an epic is in the hand. | All four states at once: **equipped**, owned, affordable, and locked. Filled pips and Flux costs read at a glance. |
+
+[![The shop: ten cards in three rows of four - motion wakes, arena palettes and two Flux amplifiers - with one wake and one arena equipped, several affordable, and Amplifier II locked behind Amplifier I](docs/screenshot-shop.webp)](docs/screenshot-shop.webp)
+
+<sub>The shop spends Flux, never money. Every card previews what it sells: the
+wakes animate, the arenas show their own grid and glow. Amplifier II stays
+locked until Amplifier I is owned.</sub>
 
 | | |
 |---|---|
@@ -226,6 +232,48 @@ Unlock pacing at a typical ~200 Flux/run: Warden run 1, Maw run 3, Needle run
 8, Pulsar run 15, Drifter run 24. Saves are validated on read — a tampered or
 corrupt `mgn.core` falls back to Prospector rather than granting a locked core.
 
+### The shop
+
+Flux's second sink, reached from the death screen or from the core menu.
+
+| Item | Cost | What it is |
+|---|---|---|
+| Standard / Ion Wake / Sparkfall / Echo | free / 250 / 450 / 700 | Motion wakes behind the player |
+| Deep Field / Nocturne / Tide / Graphite | free / 300 / 550 / 800 | Arena palettes — grid, glow and edge |
+| Amplifier I | 900 | +20% Flux from every run |
+| Amplifier II | 2200 | +45% instead; requires Amplifier I |
+
+**Nothing here can be bought into an advantage.** Wakes and arenas touch no
+value the simulation reads, and the amplifiers scale the payout only. That is
+measured rather than asserted: with `Math.random` seeded, a run with
+everything owned and equipped produces a **bit-identical state fingerprint** to
+a run with nothing owned, across five seeds and 45 simulated seconds each.
+
+Wakes deliberately carry no colour of their own and take the equipped core's
+instead. Warm hues belong to enemies in this game, and a cosmetic that could
+dress the player in an enemy's colour is a cosmetic that gets people killed.
+Arenas may recolour, because the grid is background by definition — but they
+stay dark and low-saturation for the same readability reason.
+
+### Purchases go through one adapter
+
+Every purchase in the game routes through `PURCHASE.buy(item, done)`, so
+exactly one object knows how a player pays for anything. Today the only rail is
+Flux, earned by playing.
+
+CrazyGames in-game purchases — the real-money kind — are **invite-only**. They
+issue an Xsolla project id per game, and their SDK surface is just two calls:
+`SDK.user.getXsollaUserToken()` for a short-lived token, and
+`SDK.analytics.trackOrder('xsolla', order)` to report a finished order. The
+catalogue and the checkout widget live in Xsolla's API, not theirs. A `cash`
+rail drops in beside the Flux one if that invite ever arrives, and nothing
+outside `PURCHASE` has to change.
+
+Their rules are why `canPurchase()` exists at all: real-money purchases must be
+limited to signed-in players, guests must not even see a buy button, and the
+shop has to be hidden entirely inside the CrazyGames mobile app. On the Flux
+rail none of that applies, because Flux is earned rather than bought.
+
 ---
 
 ## Two design problems that testing caught
@@ -278,7 +326,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 111 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 130 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling
@@ -307,6 +355,8 @@ requirements CrazyGames documents.
 Not documented requirements, but things QA and players notice.
 
 - [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad
+- [x] **No real-money purchases** — the shop spends Flux, which is only ever earned by playing. Answer *no* to in-game purchases on the submission form; that feature is invite-only and is not wired up
+- [x] **Nothing is pay-to-win** — proven by bit-identical seeded run fingerprints with everything owned versus nothing owned, not by inspection
 
 ### Confirm on your first upload
 
@@ -357,10 +407,18 @@ covers that gap by folding the local save into the cloud one:
 
 | Field | Rule |
 |---|---|
-| `owned` | Union — an unlock is never revoked |
+| `owned`, `shop` | Union — an unlock is never revoked |
 | `earned`, `best`, `bestwave` | Max — monotonic counters |
-| `core` | Cloud's choice if owned after the merge, else local's, else Prospector |
+| `core`, `trail`, `arena` | A real selection beats a default, cloud beats local, then the default |
 | `played` | Set if either side has it |
+
+That third rule reads oddly until you hit the bug it exists for. Every default
+is permanently "owned", so a device that never customised anything still
+*reports* a selection. Preferring the cloud unconditionally meant a phone that
+had never opened the shop would overwrite the wake, arena and **core** chosen
+on a desktop — a silent revert to defaults on sign-in, and the equipped-core
+version of it shipped in the first release. Ranking an actual choice above a
+default in both directions means a merge can only ever add information.
 
 A cloud value can land mid-session. Flux, unlocks and best scores are all read
 live so they need nothing, but the equipped core is only consulted when a run is

@@ -86,8 +86,9 @@ window.addEventListener('keydown', function(e){
   if(e.code==='Digit1'||e.code==='Digit2'||e.code==='Digit3'){
     if(G.mode==='levelup') chooseUpgrade(+e.code.slice(5)-1);
   }
-  if(e.code==='Enter' && (G.mode==='over' || G.mode==='cores')) restart();
-  if(e.code==='KeyC' && G.mode==='over') openCores();
+  if(e.code==='Enter' && (G.mode==='over' || G.mode==='cores' || G.mode==='shop')) restart();
+  if(e.code==='KeyC' && (G.mode==='over' || G.mode==='shop')) openCores();
+  if(e.code==='KeyS' && (G.mode==='over' || G.mode==='cores')) openShop();
   if(G.mode==='revive' && !G.adBusy){
     if(e.code==='KeyY') takeRevive();
     if(e.code==='KeyN') finishRun();
@@ -196,11 +197,149 @@ function coreById(id){
   for(var i=0;i<CORES.length;i++) if(CORES[i].id===id) return CORES[i];
   return CORES[0];
 }
+
+/* --------------------------------- shop ---------------------------------
+   Bought with Flux, which is only ever earned by playing. Two rules keep the
+   shop from touching the thing the bots spent so long balancing:
+
+     - wakes and arenas are looks only. Nothing in either reaches a number the
+       run reads, so no purchase can be mistaken for an advantage.
+     - the one line that is not cosmetic, the amplifier, pays out more Flux and
+       does nothing else. It buys you the rest of the shop sooner; it can never
+       buy you a longer run.
+
+   Wakes deliberately declare no colour of their own and take the equipped
+   core's instead. Warm hues belong to enemies here, and a cosmetic that could
+   dress the player in an enemy's colour is a cosmetic that gets people killed.
+   Arenas may recolour, because the grid is background by definition - but they
+   stay dark and low-saturation for the same readability reason. */
+var SHOP = [
+  { id:'trail.std',   kind:'trail', name:'STANDARD',     cost:0,
+    tag:'No wake. Just you and the field.' },
+  { id:'trail.ion',   kind:'trail', name:'ION WAKE',     cost:250,
+    tag:'A smooth ribbon in your core colour.' },
+  { id:'trail.spark', kind:'trail', name:'SPARKFALL',    cost:450,
+    tag:'Embers that shake loose behind you.' },
+  { id:'trail.echo',  kind:'trail', name:'ECHO',         cost:700,
+    tag:'Ghosts of where you just were.' },
+
+  { id:'arena.deep',  kind:'arena', name:'DEEP FIELD',   cost:0,
+    tag:'The standard arena.',
+    sky:'#05070f', grid:'84,150,255',  top:'60,120,255',  bot:'180,60,255',  edge:'124,200,255' },
+  { id:'arena.noct',  kind:'arena', name:'NOCTURNE',     cost:300,
+    tag:'Indigo grid, deeper black.',
+    sky:'#03030a', grid:'104,96,255',  top:'70,50,200',   bot:'120,40,220',  edge:'150,140,255' },
+  { id:'arena.tide',  kind:'arena', name:'TIDE',         cost:550,
+    tag:'Cold teal, lit from below.',
+    sky:'#040b10', grid:'60,200,190',  top:'20,140,160',  bot:'30,90,180',   edge:'120,240,220' },
+  { id:'arena.graph', kind:'arena', name:'GRAPHITE',     cost:800,
+    tag:'No colour at all. Only the field.',
+    sky:'#08090c', grid:'170,180,200', top:'120,130,150', bot:'90,100,120',  edge:'190,200,215' },
+
+  { id:'boost.amp1',  kind:'boost', name:'AMPLIFIER I',  cost:900,
+    tag:'+20% Flux from every run, forever.' },
+  { id:'boost.amp2',  kind:'boost', name:'AMPLIFIER II', cost:2200,
+    tag:'+45% Flux instead. Needs Amplifier I.', req:'boost.amp1' }
+];
+
+function shopById(id){
+  for(var i=0;i<SHOP.length;i++) if(SHOP[i].id===id) return SHOP[i];
+  return null;
+}
+function shopOwned(){ var s = store('mgn.shop'); return s ? s.split(',') : []; }
+function ownsItem(id){
+  var it = shopById(id);
+  if(!it) return false;
+  return it.cost === 0 || shopOwned().indexOf(id) >= 0;   // defaults are always yours
+}
+function itemLocked(it){ return !!(it && it.req && !ownsItem(it.req)); }
+function spentShop(){
+  var l = shopOwned(), t = 0;
+  for(var i=0;i<SHOP.length;i++) if(l.indexOf(SHOP[i].id) >= 0) t += SHOP[i].cost;
+  return t;
+}
+function equippedTrail(){
+  var id = store('mgn.trail') || 'trail.std';
+  return ownsItem(id) ? id : 'trail.std';
+}
+function equippedArena(){
+  var id = store('mgn.arena') || 'arena.deep';
+  return ownsItem(id) ? id : 'arena.deep';
+}
+/* Read once per frame by the background, so it is worth not walking the
+   catalogue every time. Cleared by anything that can change the answer. */
+var themeCache = null;
+function arenaTheme(){
+  if(!themeCache) themeCache = shopById(equippedArena()) || shopById('arena.deep');
+  return themeCache;
+}
+function fluxMul(){
+  if(ownsItem('boost.amp2')) return 1.45;
+  if(ownsItem('boost.amp1')) return 1.20;
+  return 1;
+}
+function buyItem(id){
+  var it = shopById(id);
+  if(!it || it.cost === 0 || ownsItem(id) || itemLocked(it)) return false;
+  if(getFlux() < it.cost) return false;
+  var l = shopOwned();      // the spend is implied by ownership, never deducted
+  if(l.indexOf(id) < 0) l.push(id);
+  store('mgn.shop', l.join(','));
+  return true;
+}
+function equipItem(id){
+  var it = shopById(id);
+  if(!it || !ownsItem(id)) return;
+  if(it.kind === 'trail') store('mgn.trail', id);
+  else if(it.kind === 'arena'){ store('mgn.arena', id); themeCache = null; }
+}
+
+/* ----------------------------- purchase rail -----------------------------
+   Every purchase in the game goes through PURCHASE.buy, so exactly one place
+   knows how a player pays for anything.
+
+   Today the only rail is Flux. CrazyGames in-game purchases are invite-only:
+   they issue an Xsolla project id per game, and their SDK surface is just two
+   calls - SDK.user.getXsollaUserToken() for a short-lived token, and
+   SDK.analytics.trackOrder('xsolla', order) to report a finished order. The
+   catalogue and the checkout widget live in Xsolla's own API, not theirs.
+
+   A 'cash' rail drops in beside the Flux one when that invite arrives, and
+   nothing outside this object has to change. Their rules are the reason
+   canPurchase() exists at all: real-money purchases must be limited to
+   signed-in players, guests must not even see a buy button, and the shop has
+   to be hidden entirely inside the CrazyGames mobile app. On the Flux rail
+   none of that applies, because Flux is earned rather than bought. */
+var PURCHASE = {
+  rail: 'flux',
+  signedIn: false,     // fed by the SDK auth listener; only the cash rail reads it
+  inCrazyApp: false,   // ditto - the app forbids real-money purchases outright
+
+  canPurchase: function(){
+    if(this.rail === 'flux') return true;
+    return this.signedIn && !this.inCrazyApp;
+  },
+  priceLabel: function(it){
+    return this.rail === 'flux' ? (it.cost + ' FLUX') : it.price;
+  },
+  /* done(ok, why) - always called, never throws, so the caller never has to
+     guess whether a purchase is still in flight. */
+  buy: function(it, done){
+    if(!it || !this.canPurchase()){ done(false, 'unavailable'); return; }
+    if(this.rail === 'flux'){
+      if(itemLocked(it)){ done(false, 'locked'); return; }
+      if(getFlux() < it.cost){ done(false, 'funds'); return; }
+      done(buyItem(it.id), 'bought');
+      return;
+    }
+    done(false, 'unavailable');   // no cash rail until the invite lands
+  }
+};
 function num(v){ var n = parseInt(v||'0',10); return isNaN(n) ? 0 : n; }
 function spentFlux(){
   var l = ownedList(), total = 0;
   for(var i=0;i<CORES.length;i++) if(l.indexOf(CORES[i].id)>=0) total += CORES[i].cost;
-  return total;
+  return total + spentShop();
 }
 /* Balance is derived, never stored, so it can never disagree with `owned`. */
 function getEarned(){ return num(store('mgn.earned')); }
@@ -228,13 +367,45 @@ function mergeSave(local, cloud){
   for(i=0;i<CORES.length;i++) if(ids[CORES[i].id]) owned.push(CORES[i].id);
   if(owned.indexOf('prospector') < 0) owned.unshift('prospector');
 
-  var core = cloud['mgn.core'];
-  if(!core || owned.indexOf(core) < 0) core = local['mgn.core'];
-  if(!core || owned.indexOf(core) < 0) core = 'prospector';
+  /* Prefer the cloud's selection, but only where it is an actual selection.
+     Every default is permanently "owned", so a device that never picked
+     anything still reports one - and letting that win silently undoes a choice
+     made somewhere else. Ranking a real choice above a default in both
+     directions means a merge can only ever add information. */
+  function pickEquipped(cloudV, localV, ok, dflt){
+    if(ok(cloudV) && cloudV !== dflt) return cloudV;
+    if(ok(localV) && localV !== dflt) return localV;
+    if(ok(cloudV)) return cloudV;
+    if(ok(localV)) return localV;
+    return dflt;
+  }
+  function ownsCore(v){ return !!v && owned.indexOf(v) >= 0; }
+  var core = pickEquipped(cloud['mgn.core'], local['mgn.core'], ownsCore, 'prospector');
+
+  var sids = {}, shop = [];
+  l = (local['mgn.shop']||'').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) sids[l[i]] = 1;
+  l = (cloud['mgn.shop']||'').split(',');
+  for(i=0;i<l.length;i++) if(l[i]) sids[l[i]] = 1;
+  for(i=0;i<SHOP.length;i++) if(sids[SHOP[i].id]) shop.push(SHOP[i].id);
+
+  /* An equipped item must be one the merged account actually has - a free
+     default, or something in the union above. */
+  function eqOk(v, kind){
+    var it = v && shopById(v);
+    return !!it && it.kind === kind && (it.cost === 0 || !!sids[v]);
+  }
+  function okTrail(v){ return eqOk(v,'trail'); }
+  function okArena(v){ return eqOk(v,'arena'); }
+  var trail = pickEquipped(cloud['mgn.trail'], local['mgn.trail'], okTrail, 'trail.std');
+  var arena = pickEquipped(cloud['mgn.arena'], local['mgn.arena'], okArena, 'arena.deep');
 
   return {
     'mgn.owned':    owned.join(','),
     'mgn.core':     core,
+    'mgn.shop':     shop.join(','),
+    'mgn.trail':    trail,
+    'mgn.arena':    arena,
     'mgn.earned':   String(Math.max(num(local['mgn.earned']),   num(cloud['mgn.earned']))),
     'mgn.best':     String(Math.max(num(local['mgn.best']),     num(cloud['mgn.best']))),
     'mgn.bestwave': String(Math.max(num(local['mgn.bestwave']), num(cloud['mgn.bestwave']))),
@@ -254,11 +425,12 @@ function adoptCloudSave(dataModule){
   for(i=0;i<SYNC_KEYS.length;i++){ k=SYNC_KEYS[i]; cloud[k] = store(k); }
   var merged = mergeSave(local, cloud);
   for(k in merged) if(merged[k] !== null) store(k, merged[k]);
+  themeCache = null;
   return merged;
 }
 
-/* The account swaps underneath us on sign-in, so the cache has to go. */
-function refreshCloudSave(){ saveCache = {}; }
+/* The account swaps underneath us on sign-in, so the caches have to go. */
+function refreshCloudSave(){ saveCache = {}; themeCache = null; }
 function ownedList(){ return (store('mgn.owned')||'prospector').split(','); }
 function owns(id){ return id==='prospector' || ownedList().indexOf(id)>=0; }
 function selectedCore(){
@@ -291,6 +463,7 @@ function newPlayer(){
     repulse:0, siphon:0, omega:2.5, orbR:46, orbDmg:1, bounce:0,
     pullMul:1, stat:0, statT:0, orbBase:0, holdMul:0.60,
     killsSinceHeal:0, charge:0, blastCool:0,
+    trail:[], trailT:0,
     core:'prospector', sides:3
   };
   var core = coreById(selectedCore());
@@ -313,7 +486,8 @@ function newGame(){
     bossRef:null, waveBanner:0, waveBannerTxt:'',
     deathT:0, ended:false, dmgFlash:0,
     postDeath:false, runFinished:false, revived:false, watchedAd:false, adAttempted:false,
-    reviveT:0, adBusy:false, adMsg:'', adMsgT:0
+    reviveT:0, adBusy:false, adMsg:'', adMsgT:0,
+    shopT:0, shopMsg:'', shopMsgT:0
   };
 }
 

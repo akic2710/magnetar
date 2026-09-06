@@ -189,7 +189,7 @@ function finishRun(){
   if(G.runFinished){ showOver(); return; }
   G.runFinished = true;
 
-  G.fluxEarned = fluxFor(G.score, G.wave);
+  G.fluxEarned = Math.round(fluxFor(G.score, G.wave) * fluxMul());
   addFlux(G.fluxEarned);
   var best = parseInt(store('mgn.best')||'0',10);
   if(G.score > best){ store('mgn.best', String(G.score)); G.newBest = true; }
@@ -478,6 +478,20 @@ function update(dt){
     else if(alive && G.mode!=='levelup') doBlast();
   }
   IN.justUp=false; IN.justDown=false;
+
+  /* ---- cosmetic wake ---- */
+  /* Sampled on the fixed timestep rather than per frame, so the wake is the
+     same length on a 60 Hz laptop as on a 165 Hz monitor. */
+  if(alive){
+    P.trailT -= dt;
+    if(P.trailT <= 0){
+      P.trailT = 0.018;
+      P.trail.unshift({x:P.x, y:P.y, a:P.orbBase});
+      while(P.trail.length > 30) P.trail.pop();
+    }
+  } else if(P.trail.length){
+    P.trail.length = 0;
+  }
 
   /* ---- scrap field ---- */
   for(var s2=0; s2<scrap.length; s2++){

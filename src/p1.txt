@@ -73,7 +73,8 @@ function len(x,y){ return Math.sqrt(x*x+y*y); }
    Reads are served from a cache so per-frame HUD lookups cost nothing, and
    every path is exception-safe: storage that throws degrades to memory
    rather than breaking the run. */
-var SYNC_KEYS  = ['mgn.earned','mgn.owned','mgn.core','mgn.best','mgn.bestwave','mgn.played'];
+var SYNC_KEYS  = ['mgn.earned','mgn.owned','mgn.core','mgn.best','mgn.bestwave','mgn.played',
+                  'mgn.shop','mgn.trail','mgn.arena'];
 var LOCAL_ONLY = {'mgn.mute':1};   // a device preference, not account state
 var saveBackend = null;            // null = localStorage, else SDK data module
 var saveCache = {};
