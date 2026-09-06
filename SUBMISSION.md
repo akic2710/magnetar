@@ -94,20 +94,31 @@ Primary: **Action**. Arcade is the reasonable second choice.
 **Players**: singleplayer
 **Orientation**: landscape
 
-**Tags** — max 5, and only tags that exist on CrazyGames. Verified live: every
-one below returns a real /t/ page, and each is already carried by comparable
-games (arena on holey-io, one-button on space-waves, survive on crazy-chameleon,
-top-down on evowars.io).
+**Tags** — max 5, chosen only from what the submission form actually offers.
 
 ```
-arena, survive, one-button, roguelike, top-down
+arena, survive, play-and-upgrade, skill, 2d
 ```
 
-Also valid if you want to swap: `skill`, `2d`, `avoid`, `upgrade`,
-`play-and-upgrade`, `difficult`, `5-minute-fun`, `adrenaline`, `casual`.
+| Tag | Why |
+|---|---|
+| `arena` | Literally what it is: one closed arena, waves closing in |
+| `survive` | The whole objective — outlast escalating waves |
+| `play-and-upgrade` | Level-up cards plus Flux and unlockable cores |
+| `skill` | Timing the release and reading the field is the game |
+| `2d` | Factual, and how players filter |
 
-Do **not** use: roguelite, upgrades, magnet, waves, neon, bullet-hell,
-shoot-em-up, endless — none of these exist as CrazyGames tags.
+Alternates if any of those are missing from the picker: `avoid` (dodging
+lancer spikes), `5-minute-fun` (runs are 2–5 minutes), `difficult` (most runs
+end in death), `casual`, `adrenaline`, `destroy`.
+
+**Do not use** — these were guessed at earlier and are wrong: roguelite,
+roguelium, upgrades, magnet, waves, neon, bullet-catching, bullet-hell,
+shoot-em-up, endless, one-button, roguelike, top-down.
+
+> Verification note: a `/t/<tag>` page returning 200 does **not** mean the tag
+> is selectable in the developer form. The form's dropdown is the only
+> authority. Pick from it; do not infer from site URLs.
 
 ---
 
