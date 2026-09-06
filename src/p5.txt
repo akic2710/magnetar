@@ -195,14 +195,30 @@ function drawWaveRings(){
   }
 }
 
+/* Forty-odd scrap were drawn at identical weight whether or not you could do
+   anything with them, and they are additive, so the field became a haze that
+   every other read had to compete with.
+
+   Thinning the field was measured and rejected - it is the ammunition supply,
+   and cutting the count enough to matter visibly made the orbit measurably
+   slower to fill. The count is not the problem; equal salience is. So the
+   subset the magnet can actually reach lights up, and the rest goes quiet.
+   Same economy, far fewer things asking for attention at once - and it makes
+   your reach visible, which nothing else in the game showed. */
 function drawScrap(){
+  var held = (IN.down || IN.kMag) && (G.mode==='play' || G.mode==='intro') && P.hp > 0;
+  var r2 = P.magR * P.magR;
   for(var i=0;i<scrap.length;i++){
     var s = scrap[i];
-    blob(s.x,s.y,s.r*2.6,'rgba(255,190,70,0.20)');
+    var dx = s.x-P.x, dy = s.y-P.y;
+    var live = held && (dx*dx + dy*dy) < r2;
+    blob(s.x, s.y, s.r*(live?2.8:2.0), live ? 'rgba(255,205,95,0.26)' : 'rgba(255,190,70,0.09)');
     ctx.save();
     ctx.translate(s.x,s.y); ctx.rotate(s.a);
+    ctx.globalAlpha = live ? 1 : 0.6;
     ctx.fillStyle = C.scrap;
     ctx.fillRect(-s.r*0.62,-s.r*0.62,s.r*1.24,s.r*1.24);
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 }

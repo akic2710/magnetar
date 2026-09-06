@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-166_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-167_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -369,6 +369,43 @@ wave 79 and never died. Fix: the **lancer** fires a non-magnetic spike after a
 0.85s telegraphed charge. It cannot be caught, only dodged, which breaks the
 dominant "hold forever" strategy. Sustain was also capped to one heal per wave.
 
+### The scrap field: measured, then not thinned
+
+The field is the densest thing on screen, so the obvious move is to cut it.
+Measured with a greedy bot that holds the magnet and releases the instant the
+orbit fills — the direct test of ammunition supply, which the survival bot
+never stressed because it only ever filled to 38%:
+
+| `scrapCap` | avg on screen | time to fill @ wave 1 | @ wave 12 |
+|---|---|---|---|
+| **44** (shipped) | 53.3 | 2.21s | 2.41s |
+| 38 | 46.6 | +2% | +0% |
+| 32 | 41.4 | +9% | **+23%** |
+| 28 | 38.3 | +20% | **+43%** |
+| 24 | 35.7 | +11% | **+56%** |
+| 16 | 26.5 | +39% | **the orbit stops filling** |
+
+So the count is not slack — it is the ammunition supply, and any cut deep
+enough to be visible costs real fill time in the waves that matter. The
+surplus above the cap is not the culprit either: tightening the `cap + 30`
+trim all the way to `cap + 3` only removed 15% of the field.
+
+**The count was never the problem; equal salience was.** Forty-odd pieces were
+drawn at identical weight whether or not the magnet could reach them, and they
+composite additively, so a cluster became haze. Now the subset inside the
+magnet radius lights up while you hold, and the rest goes quiet:
+
+| | the field's share of screen light |
+|---|---|
+| Before | 2.40 |
+| Now, not holding | **1.14** (−53%) |
+| Now, holding | 2.52 |
+
+Half as loud when you are not using it, slightly brighter than before when you
+are — and it makes your reach visible, which nothing else in the game showed.
+The economy is untouched, and the seeded bot returns the same 67.8s / 87.3s /
+7.7 to the decimal.
+
 ### Teaching the roster
 
 Six enemy types arrive between waves 2 and 11, and until now nothing ever
@@ -492,7 +529,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 166 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 167 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling
