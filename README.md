@@ -40,7 +40,14 @@ it throws at you is also the ammunition you kill it with.</sub>
 
 | | |
 |---|---|
-| <img src="docs/screenshot-mobile.webp" width="215" alt="The rotate prompt on a 375x667 phone in portrait: an animated phone turning from portrait to landscape under a sweeping arrow, with ROTATE YOUR DEVICE and a Play anyway button"> | **Portrait on a phone.** The arena is a fixed 16:9 field scaled to fit, so a 375×667 screen would get a 375×211 strip — **32% of the display**. Rather than letterbox into that silently, the game asks for landscape, where the playfield gets the full width at roughly double the scale.<br><br>Shown only on touch devices in portrait, never on desktop and never over an ad. It pauses the run and covers the letterbox bars too. Always dismissable via **Play anyway** — orientation can be locked at the OS level, and nobody should ever be stuck. |
+
+### Portrait on a phone
+
+| Letterboxed | With the rotate prompt |
+|---|---|
+| <img src="docs/screenshot-letterbox.webp" width="215" alt="A 375x667 phone in portrait showing the 16:9 playfield squeezed into a narrow strip with large black bars above and below"> | <img src="docs/screenshot-mobile.webp" width="215" alt="The same phone showing the rotate prompt: an animated phone turning from portrait to landscape under a sweeping arrow, with ROTATE YOUR DEVICE and a Play anyway button"> |
+| **The problem.** The arena is a fixed 16:9 field scaled to fit, so a 375×667 screen gets a 375×211 strip — **32% of the display**, with 228px of black above and below. Nothing breaks and the layout holds, but it is small. | **The fix.** Landscape gives the playfield the full width at roughly double the scale, so the game asks for it rather than letterboxing silently. Touch devices in portrait only — never on desktop, never over an ad — and always dismissable via **Play anyway**, since orientation can be locked at the OS level. |
+
 
 ```
 dist/index.html    <- the submission build (standalone, no dependencies)
