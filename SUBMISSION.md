@@ -25,15 +25,15 @@ to bundle anyway.
 | Landscape cover | `covers/landscape_1920x1080.png` | 1920×1080 |
 | Portrait cover | `covers/portrait_800x1200.png` | 800×1200 |
 | Square cover | `covers/square_800x800.png` | 800×800 |
-| Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, H.264, no audio — **stale, see below** |
-| Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, gameplay over a title lockup |
+| Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, 30fps, H.264, no audio |
+| Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, 30fps, gameplay framed in a title card |
 
-> **The two preview videos predate 13 commits of visible change** — they still
-> show a health bar on every tough enemy, the old brighter scrap field, the
-> duplicated WAVE label, whole hearts rather than halves, and no shop. The
-> covers are stylised enough to still be accurate. Regenerate the videos before
-> uploading, or upload without them and add them later; CrazyGames lets you
-> update media after submission.
+> Both preview videos were recaptured against the current build on 06/09/2026
+> and match what a player now loads. They are deterministic captures rather
+> than screen recordings — the frame loop is driven at a synthetic 30 Hz clock
+> with the canvas pinned to the output size — so re-running the capture gives
+> the same ten seconds again. The landscape clip opens on wave 7 at full
+> health and ends on wave 8 having taken one hit.
 
 Build size is ~168 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
