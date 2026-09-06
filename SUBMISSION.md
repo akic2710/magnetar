@@ -113,7 +113,7 @@ lancer spikes), `5-minute-fun` (runs are 2–5 minutes), `difficult` (most runs
 end in death), `casual`, `adrenaline`, `destroy`.
 
 **Do not use** — these were guessed at earlier and are wrong: roguelite,
-roguelium, upgrades, magnet, waves, neon, bullet-catching, bullet-hell,
+upgrades, magnet, waves, neon, bullet-catching, bullet-hell,
 shoot-em-up, endless, one-button, roguelike, top-down.
 
 > Verification note: a `/t/<tag>` page returning 200 does **not** mean the tag
