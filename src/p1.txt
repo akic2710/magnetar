@@ -249,6 +249,17 @@ var A = {
   sWave:function(){ this.tone(392,0.16,'triangle',0.15); this.tone(587,0.30,'triangle',0.15,null,0.11); },
   sBoss:function(){ this.tone(90,1.1,'sawtooth',0.25,40); this.hit(0.9,0.20,420,0.6); },
   sUi:function(){ this.tone(700,0.06,'square',0.10,900); },
+  /* The orbit hitting capacity is the one moment the game wants you to act on,
+     so it gets its own two-note lift rather than being left to the hum. */
+  sCharged:function(){
+    this.tone(880,0.09,'triangle',0.11,1180);
+    this.tone(1318,0.16,'sine',0.08,null,0.055);
+  },
+  /* Passing your own best mid-run - short and bright, not a fanfare. */
+  sBest:function(){
+    var n=[784,1046,1318];
+    for(var i=0;i<3;i++) this.tone(n[i],0.26,'triangle',0.15,null,i*0.06);
+  },
   sDead:function(){ this.tone(300,1.3,'sawtooth',0.26,36); this.hit(1.0,0.22,600,0.5); },
   sHeal:function(){ var n=[659,880,1174]; for(var i=0;i<3;i++) this.tone(n[i],0.24,'sine',0.16,null,i*0.06); },
 

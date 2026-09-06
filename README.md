@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-161_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-164_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -369,6 +369,31 @@ wave 79 and never died. Fix: the **lancer** fires a non-magnetic spike after a
 0.85s telegraphed charge. It cannot be caught, only dodged, which breaks the
 dominant "hold forever" strategy. Sustain was also capped to one heal per wave.
 
+### Feedback, and the reason to press play again
+
+Four additions, all of them presentation only — the seeded bot measurement
+below is unchanged to the decimal, which is the point: none of this touches
+what the simulation does.
+
+- **The orbit filling is a moment now.** It is what the whole verb builds
+  towards and it used to pass in silence — you found out by noticing a thin
+  arc change colour. It gets a two-note lift, an expanding ring, and a
+  capacity arc that breathes, so *let go now* is readable peripherally.
+- **The combo is playable.** A chain that expires invisibly is one you cannot
+  play to. The draining bar under the counter is the same information the
+  text's fading alpha already carried, made legible.
+- **Passing your own best is called out when it happens**, not only on the
+  death screen. That is the moment a run stops being *a* run and becomes *the*
+  run.
+- **The death screen names the next thing to play for** — `180 BANKED · 70 TO
+  WARDEN`. The line composes what you have, what it is nearly enough for, and
+  whether an amplifier padded it, then trims from the least important end
+  until it fits, so a 280-wide phone drops a clause instead of overflowing.
+
+That last one is the only change aimed at the loop rather than the moment, and
+it is deliberately just surfacing state the game already had: the next unlock
+is real, earned by playing, and always the cheapest thing you do not own.
+
 ### Half hearts
 
 Damage comes in half hearts. The split is meant to be readable off the screen
@@ -438,7 +463,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 161 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 164 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling

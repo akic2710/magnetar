@@ -22,6 +22,15 @@ function captureInto(kind, x, y, r){
   if(orbit.length >= P.cap) return false;
   orbit.push({kind:kind, ang:0, cur:len(x-P.x,y-P.y), r:r, x:x, y:y, spin:rnd(-4,4), t:0});
   redistribute();
+  /* Filling the orbit is the moment the whole verb is building towards, and it
+     used to pass in silence - you found out by watching a thin arc change
+     colour. One cue, once, on the frame it fills. */
+  if(orbit.length >= P.cap && !G.charged){
+    G.charged = true;
+    G.chargeT = 0.55;
+    A.sCharged();
+    ring(P.x, P.y, P.orbR*2.8, hexA(C.scrap,0.65), 0.42, 3);
+  }
   return true;
 }
 function redistribute(){
@@ -88,6 +97,19 @@ function killEnemy(e){
   var pts = Math.round(e.sc * mult);
   G.score += pts;
   G.xp += e.xp;
+
+  /* The run stops being "a run" and becomes "the run" the moment it passes
+     your own record, so say so then rather than only on the death screen. */
+  if(!G.passedBest){
+    var pb = parseInt(store('mgn.best')||'0',10);
+    if(pb > 0 && G.score > pb){
+      G.passedBest = true;
+      A.sBest();
+      popText(P.x, P.y-54, 'NEW BEST', C.scrap, 28);
+      ring(P.x, P.y, 230, hexA(C.scrap,0.65), 0.7, 4);
+      G.flash = Math.max(G.flash, 0.35);
+    }
+  }
   if(G.combo>2) popText(e.x, e.y-8, '+'+pts, C.scrap, 20);
 
   spark(e.x, e.y, e.type==='boss'?60:(10+Math.round(e.r*0.6)), e.col, 90, 340+e.r*6, 0.25, 0.7, 3.4);
@@ -498,6 +520,8 @@ function update(dt){
     else if(alive && G.mode!=='levelup') doBlast();
   }
   IN.justUp=false; IN.justDown=false;
+
+  if(orbit.length < P.cap) G.charged = false;
 
   /* ---- cosmetic wake ---- */
   /* Sampled on the fixed timestep rather than per frame, so the wake is the
