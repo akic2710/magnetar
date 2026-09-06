@@ -385,10 +385,24 @@ never stressed because it only ever filled to 38%:
 | 24 | 35.7 | +11% | **+56%** |
 | 16 | 26.5 | +39% | **the orbit stops filling** |
 
-So the count is not slack — it is the ammunition supply, and any cut deep
-enough to be visible costs real fill time in the waves that matter. The
-surplus above the cap is not the culprit either: tightening the `cap + 30`
+The surplus above the cap is not the culprit either: tightening the `cap + 30`
 trim all the way to `cap + 3` only removed 15% of the field.
+
+**Cap 38 looked free and was not.** Time-to-fill is a measure of the *buffer* —
+how fast an empty orbit refills while you camp — and by that metric 38 costs
+nothing at any wave (−1.5% to +6.9%, same build, cap overridden, 12 seeds).
+But scrap is *throughput*, not a buffer. Over a whole run, 20 seeds, cap
+overridden on one build:
+
+| | cap 44 | cap 38 | |
+|---|---|---|---|
+| median run | 67.8s | 61.9s | −8.7% |
+| mean run | 87.3s | 80.2s | −8.1% |
+| kills per run | 80.1 | 70.3 | **−12.2%** |
+| scrap on screen | 53.3 | 46.8 | −12.2% |
+
+Kills track the scrap count one-for-one. There is no free rung: any thinning
+visible enough to matter is a difficulty change, so the count stays at 44.
 
 **The count was never the problem; equal salience was.** Forty-odd pieces were
 drawn at identical weight whether or not the magnet could reach them, and they
