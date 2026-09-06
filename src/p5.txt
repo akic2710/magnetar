@@ -96,9 +96,13 @@ function render(rdt){
   base();
   ctx.save();
   ctx.beginPath(); ctx.rect(0,0,VW,VH); ctx.clip();
-  // Both meta screens are full screens of their own, and the HUD would ghost
-  // through the 0.94 backdrop they draw over it.
-  if(G.mode!=='cores' && G.mode!=='shop') drawHUD();
+  /* The HUD belongs to the arena. On a decision screen it only repeats in a
+     ghost layer what the panel already says - wave, score, level - and offers
+     a pause button that does nothing there. The meta screens are full screens
+     of their own and would ghost through their backdrop as well. */
+  var showHUD = (G.mode==='play' || G.mode==='intro' ||
+                 G.mode==='dying' || G.mode==='revive');
+  if(showHUD) drawHUD();
   if(G.mode==='intro') drawIntro();
   if(G.mode==='levelup') drawLevelUp();
   if(G.mode==='over') drawGameOver();
@@ -110,13 +114,16 @@ function render(rdt){
   if(G.paused && G.mode==='play') drawPaused();
   drawCursor();
 
-  if(G.flash>0.001){
+  /* Belt and braces: even mid-fade, these belong to the arena and not to a
+     screen you are reading. */
+  var arenaFx = (G.mode==='play' || G.mode==='intro' || G.mode==='dying');
+  if(arenaFx && G.flash>0.001){
     ctx.globalCompositeOperation='lighter';
     ctx.fillStyle='rgba(180,220,255,'+(G.flash*0.30)+')';
     ctx.fillRect(0,0,VW,VH);
     ctx.globalCompositeOperation='source-over';
   }
-  if(G.dmgFlash>0.001){
+  if(arenaFx && G.dmgFlash>0.001){
     // Kept off the centre of the screen: the moment you take a hit is the
     // moment you most need to see what is coming next.
     var gr = ctx.createRadialGradient(VW/2,VH/2,VH*0.42, VW/2,VH/2,VH*0.88);
@@ -332,7 +339,9 @@ function drawEnemies(){
       ctx.globalAlpha = 1;
     }
 
-    if(e.maxHp>2 && e.type!=='boss'){
+    // Only once it has something to say: a full bar is six pixels of noise
+    // repeated across every tough enemy on screen.
+    if(e.maxHp>2 && e.type!=='boss' && e.hp < e.maxHp){
       var w = e.r*1.8, hp = clamp(e.hp/e.maxHp,0,1);
       ctx.globalAlpha=0.85;
       ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(e.x-w/2, e.y-e.r-11, w, 4);
@@ -593,7 +602,9 @@ function drawIntro(){
 function drawLevelUp(){
   G.cardT = (G.cardT||0) + 0.016;
   var a = clamp(G.cardT*5,0,1);
-  ctx.fillStyle='rgba(3,5,14,'+(0.82*a)+')';
+  // Deep enough that the slowed field reads as texture rather than as
+  // something moving across the words you are trying to compare.
+  ctx.fillStyle='rgba(3,5,14,'+(0.90*a)+')';
   ctx.fillRect(0,0,VW,VH);
 
   var hi = RARITY[G.bestRarity||0];
@@ -619,7 +630,10 @@ function drawLevelUp(){
       ctx.globalAlpha = ca;
     }
 
-    ctx.fillStyle = hov ? hexA(rar.col,0.15) : 'rgba(255,255,255,0.042)';
+    /* A card needs its own surface. At 4% white the slowed field drifted
+       straight through the words you are comparing - the neon edge still
+       carries the styling, the fill just stops competing with the text. */
+    ctx.fillStyle = hov ? hexA(rar.col,0.15) : 'rgba(7,10,20,0.72)';
     roundRect(r.x, top, r.w, r.h, 18); ctx.fill();
     ctx.strokeStyle = hov ? rar.col : hexA(rar.col, u.r?0.55:0.32);
     ctx.lineWidth = hov?3:(u.r?2:1.5);
@@ -659,6 +673,8 @@ function drawLevelUp(){
 
   text(IN.isTouch?'Tap a card':'Click a card, or press 1 / 2 / 3',
        VW/2, 616, 14, C.dim, 'center', 600, a*0.75, 1.5);
+  // Pause means nothing here, so only the mute button comes along.
+  drawBtn(BTN_MUTE, (A.muted||A.forced)?'muted':'sound');
 }
 
 function wrapText(str,cx,y,size,col,maxW,lh,align,alpha){
@@ -699,7 +715,7 @@ function drawGameOver(){
 
   var by = overY(), bw = 580, bx = VW/2-bw/2, bh = OVER_H;
   ctx.globalAlpha = a;
-  ctx.fillStyle='rgba(255,255,255,0.042)';
+  ctx.fillStyle='rgba(7,10,20,0.72)';      // same reason as the level-up cards
   roundRect(bx,by,bw,bh,22); ctx.fill();
   ctx.strokeStyle=hexA(C.player,0.30); ctx.lineWidth=2;
   roundRect(bx,by,bw,bh,22); ctx.stroke();
@@ -768,6 +784,7 @@ function drawGameOver(){
     ? (IN.isTouch ? 'Tap PLAY AGAIN to retry' : 'Press PLAY AGAIN or Enter to retry')
     : (IN.isTouch ? 'Tap anywhere to retry'   : 'Click anywhere or press Enter to retry');
   text(hint, VW/2, by+bh-26, 12, C.dim, 'center', 600, 0.55*a, 1.5);
+  drawBtn(BTN_MUTE, (A.muted||A.forced)?'muted':'sound');
   ctx.globalAlpha = 1;
 }
 
@@ -2157,6 +2174,15 @@ function frame(now){
 
   if(!G.adBusy) A.tick();
   G.uiT += rdt;
+
+  /* These three are presentation, not simulation, so they tick on real time.
+     Decayed inside update() they froze whenever the sim stopped - and since
+     you almost always take a hit in the moments before dying, the red damage
+     flash stayed painted at full strength over the death screen and every
+     menu reached from it. */
+  G.flash    = Math.max(0, G.flash    - rdt*2.4);
+  G.dmgFlash = Math.max(0, G.dmgFlash - rdt*1.8);
+  G.chroma   = Math.max(0, G.chroma   - rdt*1.4);
   if(G.mode==='over') G.overT = (G.overT||0) + rdt;
   if(G.menuMsgT > 0) G.menuMsgT -= rdt;
 

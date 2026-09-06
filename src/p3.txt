@@ -346,10 +346,8 @@ function update(dt){
 
   /* ---- timers / global fx ---- */
   G.shake = Math.max(0, G.shake - G.shake*7*dt - 12*dt);
-  G.flash = Math.max(0, G.flash - dt*2.4);
   G.pulse = Math.max(0, G.pulse - dt*2.2);
-  G.chroma = Math.max(0, G.chroma - dt*1.4);
-  G.dmgFlash = Math.max(0, G.dmgFlash - dt*1.8);
+  /* flash, dmgFlash and chroma decay in frame() instead - see the note there. */
   G.waveBanner = Math.max(0, G.waveBanner - dt);
   if(G.comboT>0){ G.comboT-=dt; if(G.comboT<=0) G.combo=0; }
   P.inv = Math.max(0, P.inv-dt);
