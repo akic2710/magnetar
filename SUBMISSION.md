@@ -7,8 +7,13 @@ require an account, a login, or payout details are yours — see
 Build the upload artifact any time with:
 
 ```bash
-node build.mjs && cd dist && zip -j ../submission/magnetar.zip index.html
+node build.mjs
 ```
+
+That is the whole thing. **Upload `dist/index.html` on its own** — drag the file
+straight into the upload zone. CrazyGames rejects archives ("Archive files are
+not supported"), and since the game is one self-contained file there is nothing
+to bundle anyway.
 
 ---
 
@@ -16,12 +21,12 @@ node build.mjs && cd dist && zip -j ../submission/magnetar.zip index.html
 
 | What | File | Notes |
 |---|---|---|
-| Game build | `submission/magnetar.zip` | `index.html` at the zip root, no subfolders |
+| Game build | `dist/index.html` | The whole game, one file. Drag it in directly — no zip |
 | Landscape cover | `covers/landscape_1920x1080.png` | 1920×1080 |
 | Portrait cover | `covers/portrait_800x1200.png` | 800×1200 |
 | Square cover | `covers/square_800x800.png` | 800×800 |
 
-Build size is ~110 KB in one file — far inside the 50 MB initial-download cap
+Build size is ~111 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
 eligibility.
 
@@ -122,7 +127,7 @@ oversights:
    make, not mine to click through.
 4. **Press Submit.**
 
-Then: click *Submit a game*, upload `submission/magnetar.zip`, add the three
+Then: click *Submit a game*, upload `dist/index.html`, add the three
 covers, paste the fields above, and send it. QA usually replies within one to
 two days, often with screenshots of anything they want changed.
 
