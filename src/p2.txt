@@ -487,7 +487,7 @@ function newGame(){
     deathT:0, ended:false, dmgFlash:0,
     postDeath:false, runFinished:false, revived:false, watchedAd:false, adAttempted:false,
     reviveT:0, adBusy:false, adMsg:'', adMsgT:0,
-    shopT:0, shopMsg:'', shopMsgT:0
+    shopT:0, shopMsg:'', shopMsgT:0, shopTab:0
   };
 }
 
