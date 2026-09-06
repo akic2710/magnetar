@@ -488,7 +488,8 @@ function newGame(){
     postDeath:false, runFinished:false, revived:false, watchedAd:false, adAttempted:false,
     reviveT:0, adBusy:false, adMsg:'', adMsgT:0,
     shopT:0, menuMsg:'', menuMsgT:0, shopTab:0,
-    charged:false, chargeT:0, passedBest:false
+    charged:false, chargeT:0, passedBest:false,
+    seen:{}, hintQ:[], hintTxt:'', hintT:0
   };
 }
 
@@ -533,6 +534,22 @@ var ETYPE = {
   boss:    {r:58, hp:44, spd:52, xp:16,sc:400, col:C.boss}
 };
 
+/* Six types arrive between waves 2 and 11 and nothing ever named them. Each
+   line is the ONE rule that changes what you should do - not flavour, and not
+   a stat sheet. The drone is left out on purpose: it is the first thing you
+   ever see and it does the obvious thing.
+
+   The shooter and the lancer are the pair that matter most. The whole game
+   rests on "their shots are ammunition", and on the single exception to it,
+   and neither was ever said out loud. */
+var ETYPE_HINT = {
+  spinner:  'SPINNER \u2014 fast, and never in a straight line',
+  shooter:  'SHOOTER \u2014 its shots are magnetic. Catch them and send them back',
+  splitter: 'SPLITTER \u2014 breaks into drones when it dies',
+  brute:    'BRUTE \u2014 heavy. Touching one costs a whole heart',
+  lancer:   'LANCER \u2014 its spike cannot be caught. Dodge it'
+};
+
 function makeEnemy(type, x, y){
   var d = ETYPE[type];
   var wave = Math.max(1,G.wave);
@@ -551,6 +568,11 @@ function makeEnemy(type, x, y){
 function spawnAt(type, pt){
   var e = makeEnemy(type, pt.x, pt.y);
   enemies.push(e);
+  // Queued rather than shown, so two new types in one wave do not overlap.
+  if(ETYPE_HINT[type] && !G.seen[type]){
+    G.seen[type] = 1;
+    G.hintQ.push(ETYPE_HINT[type]);
+  }
   waves.push({x:pt.x, y:pt.y, r:6, max:type==='boss'?110:46, life:0.6, col:e.col, w:3});
   return e;
 }

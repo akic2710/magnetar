@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-164_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-166_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -369,6 +369,35 @@ wave 79 and never died. Fix: the **lancer** fires a non-magnetic spike after a
 0.85s telegraphed charge. It cannot be caught, only dodged, which breaks the
 dominant "hold forever" strategy. Sustain was also capped to one heal per wave.
 
+### Teaching the roster
+
+Six enemy types arrive between waves 2 and 11, and until now nothing ever
+named one. The whole game rests on *their shots are ammunition* — and on the
+single exception to it, the lancer's spike — and neither was said out loud
+anywhere. The intro taught move, hold, release, and stopped.
+
+Each type now introduces itself the first time it appears in a run, one line,
+one at a time, queued so two arriving together never overlap:
+
+| | |
+|---|---|
+| Spinner | fast, and never in a straight line |
+| Shooter | its shots are magnetic. Catch them and send them back |
+| Splitter | breaks into drones when it dies |
+| Brute | heavy. Touching one costs a whole heart |
+| Lancer | its spike cannot be caught. Dodge it |
+
+The drone is deliberately silent: it is the first thing you ever see and it
+does the obvious thing. The Guardian already announces itself in the wave
+banner. The intro's last beat now states the exception too, since that is
+where the rule is first given.
+
+Two things also got quieter. The combo readout topped out at 53px in the
+middle of the fight and now tops out at 43. And the wave banner announces the
+wave in 38px letters while the HUD label repeated the same word in the corner
+— they cross-fade now, so the centre column carries three things instead of
+four.
+
 ### Feedback, and the reason to press play again
 
 Four additions, all of them presentation only — the seeded bot measurement
@@ -463,7 +492,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 164 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 166 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling

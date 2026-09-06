@@ -44,6 +44,7 @@ function inRect(px,py,r){ return px>=r.x && px<=r.x+r.w && py>=r.y && py<=r.y+r.
 /* One spacing scale for every screen. Panels breathe at PAD, groups separate
    at GAP, and a hairline rule does the work that cramped spacing used to. */
 var PAD = 28, GAP = 36;
+var HINT_SECONDS = 3.6;      // long enough to read once, short enough to ignore
 
 var BTN_MUTE  = {x:VW-114, y:VH-76, w:44, h:44};
 var BTN_PAUSE = {x:VW-60,  y:VH-76, w:44, h:44};
@@ -505,11 +506,17 @@ function drawHUD(){
     ctx.restore();
   }
 
-  // wave + remaining
+  /* Wave + remaining. The banner announces the wave in 38px letters at the same
+     moment, so the label steps aside while it does - otherwise the same word
+     is stacked twice down the middle of the screen, and the centre column
+     carries four things at once. They cross-fade. */
   if(G.wave>0){
-    text('WAVE '+G.wave, VW/2, 40, 21, C.text, 'center', 800, 0.92, 3);
-    var remaining = enemies.length + G.spawnQ.length;
-    if(remaining>0) text(remaining+' LEFT', VW/2, 66, 11, C.dim, 'center', 700, 0.75, 2.5);
+    var wa = 0.92 * (1 - clamp(G.waveBanner/0.6, 0, 1));
+    if(wa > 0.02){
+      text('WAVE '+G.wave, VW/2, 40, 21, C.text, 'center', 800, wa, 3);
+      var remaining = enemies.length + G.spawnQ.length;
+      if(remaining>0) text(remaining+' LEFT', VW/2, 66, 11, C.dim, 'center', 700, wa*0.8, 2.5);
+    }
   }
 
   // score
@@ -534,10 +541,17 @@ function drawHUD(){
     text(G.waveBannerTxt, VW/2, 214 - rise, 38, C.text, 'center', 900, alpha*0.9, 11);
   }
 
+  /* Sits below the wave announcement, in the calm band above the fight. */
+  if(G.hintT > 0 && G.hintTxt && (G.mode==='play' || G.mode==='intro')){
+    var hfade = clamp(Math.min(G.hintT/0.6, (HINT_SECONDS-G.hintT)/0.4), 0, 1);
+    text(G.hintTxt, VW/2, 252, 15, C.text, 'center', 700, hfade*0.82, 1.2);
+  }
+
   // combo
   if(G.combo>1){
     var ca = clamp(G.comboT/2.6,0,1);
-    var sz = 34 + Math.min(G.combo,12)*1.6;
+    // Was 34 + up to 19px, which put a 53px number in the middle of the fight.
+    var sz = 30 + Math.min(G.combo,10)*1.3;
     text('x'+G.combo, VW/2, 134, sz, C.scrap, 'center', 900, 0.35+ca*0.65, 1);
     text('COMBO', VW/2, 134+sz*0.64, 11, C.scrap, 'center', 700, ca*0.55, 4);
     /* A chain that expires invisibly is a chain you cannot play to. The bar is
@@ -606,7 +620,7 @@ function drawIntro(){
   if(G.introStep===0){ line1 = touch?'DRAG to move':'MOVE your mouse to fly'; line2 = 'The core follows you.'; }
   else if(G.introStep===1){ line1 = touch?'HOLD to pull':'HOLD the button to pull'; line2 = 'Drag scrap into orbit around you.'; }
   else if(G.introStep===2){ line1 = 'RELEASE to blast'; line2 = 'Everything in orbit fires outward.'; }
-  else { line1 = 'Catch their shots. Send them back.'; line2 = 'Survive the waves.'; }
+  else { line1 = 'Catch their shots. Send them back.'; line2 = 'White spikes cannot be caught \u2014 dodge those.'; }
 
   var a = clamp(G.introT*3,0,1) * (G.introStep===3 ? clamp(1.4-G.introT,0,1) : 1);
   ctx.globalAlpha = 1;
@@ -2225,6 +2239,10 @@ function frame(now){
   G.dmgFlash = Math.max(0, G.dmgFlash - rdt*1.8);
   G.chroma   = Math.max(0, G.chroma   - rdt*1.4);
   G.chargeT  = Math.max(0, G.chargeT  - rdt*1.6);
+  /* One hint at a time, and only once the last has cleared - the point is to
+     reduce what you have to take in, not to add a second thing to read. */
+  if(G.hintT > 0) G.hintT -= rdt;
+  else if(G.hintQ && G.hintQ.length){ G.hintTxt = G.hintQ.shift(); G.hintT = HINT_SECONDS; }
   if(G.mode==='over') G.overT = (G.overT||0) + rdt;
   if(G.menuMsgT > 0) G.menuMsgT -= rdt;
 
