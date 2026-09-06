@@ -481,11 +481,13 @@ function newGame(){
     score:0, level:1, xp:0, xpNeed:9,
     combo:0, comboT:0, bestCombo:0, kills:0,
     shake:0, flash:0, pulse:0, chroma:0,
-    /* 44, and measured. Cutting it to 38 leaves the time to refill an empty
-       orbit unchanged - but scrap is throughput, not a buffer, and 12% fewer
-       pieces on the field is 12% fewer kills and an 8% shorter run. There is no
-       free rung: any visible thinning is a difficulty change. */
-    cards:[], scrapCap:44,
+    /* 38, and it needs no compensation - established at 240 seeds, where the
+       difference from 44 is 1.0s of an 87s mean, a quarter of one standard
+       error. Two earlier readings at 20 seeds disagreed with each other and
+       with this; 20 seeds is reproducible but nowhere near precise enough on a
+       distribution this bimodal. Anything measured here needs a few hundred
+       runs and a standard error printed beside it. */
+    cards:[], scrapCap:38,
     introStep:0, introT:0, introPulled:false, introBlasted:false,
     bossRef:null, waveBanner:0, waveBannerTxt:'',
     deathT:0, ended:false, dmgFlash:0,

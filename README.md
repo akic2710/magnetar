@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-167_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-168_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -388,21 +388,28 @@ never stressed because it only ever filled to 38%:
 The surplus above the cap is not the culprit either: tightening the `cap + 30`
 trim all the way to `cap + 3` only removed 15% of the field.
 
-**Cap 38 looked free and was not.** Time-to-fill is a measure of the *buffer* —
-how fast an empty orbit refills while you camp — and by that metric 38 costs
-nothing at any wave (−1.5% to +6.9%, same build, cap overridden, 12 seeds).
-But scrap is *throughput*, not a buffer. Over a whole run, 20 seeds, cap
-overridden on one build:
+**`scrapCap` is 38, and it costs nothing.** That took three attempts to
+establish, and the first two were both under-powered:
 
-| | cap 44 | cap 38 | |
-|---|---|---|---|
-| median run | 67.8s | 61.9s | −8.7% |
-| mean run | 87.3s | 80.2s | −8.1% |
-| kills per run | 80.1 | 70.3 | **−12.2%** |
-| scrap on screen | 53.3 | 46.8 | −12.2% |
+| sample | verdict |
+|---|---|
+| 5 seeds, fill time only | "free" — right answer, no evidence |
+| 20 seeds, whole runs | "−8.1%, not free" — wrong answer, same lack of evidence |
+| **240 seeds, whole runs** | **−1.0s of an 87s mean: 0.24 standard errors** |
 
-Kills track the scrap count one-for-one. There is no free rung: any thinning
-visible enough to matter is a difficulty change, so the count stays at 44.
+Twenty seeds is *reproducible* — the same seeds give the same number every
+time, which is why it looked trustworthy — but reproducible is not precise.
+Run outcomes here are strongly bimodal, so twenty of them estimate the mean to
+about ±10s, and every difference anyone cared about was smaller than that.
+
+At 240 seeds, cap 44 gives 86.9s ± 3.1 and cap 38 gives 85.9s ± 3.1, with the
+median actually a shade *higher* at 38. The field drops from 53.2 to 48.5 on
+screen (−9%) for no measurable difficulty change, so no compensation is needed
+and none was added.
+
+> **If you tune anything here, use a few hundred runs and print the standard
+> error next to the number.** Two confident, contradictory conclusions came out
+> of samples that could not tell them apart.
 
 **The count was never the problem; equal salience was.** Forty-odd pieces were
 drawn at identical weight whether or not the magnet could reach them, and they
@@ -525,8 +532,9 @@ Latest sample is 15 bot runs per core, 90 runs total, capped at 6 minutes:
 Outcomes are strongly bimodal — a run either ends by wave 20 or snowballs — so
 per-core medians swing by 20+ waves between samples of nine. Two passes read
 Warden at 24 and then 43 with **identical config**. Treat single-digit samples
-as noise; the 15-run means above are the trustworthy figure. Tuning lives in
-`startWave` (`src/p2.txt`) and `ETYPE` / `UPGRADES` / `CORES`.
+as noise. Tuning lives in `startWave` (`src/p2.txt`) and `ETYPE` / `UPGRADES` /
+`CORES` — and see the standard-error warning under **The scrap field** before
+trusting any small sample here.
 
 ---
 
@@ -543,7 +551,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 167 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 168 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling
