@@ -94,14 +94,31 @@ Primary: **Action**. Arcade is the reasonable second choice.
 **Players**: singleplayer
 **Orientation**: landscape
 
-**Tags** — max 5, chosen only from what the submission form actually offers.
+**Tags** — max 5. Confirmed against the actual picker in the submission form.
 
 ```
-arena, survive, play-and-upgrade, skill, 2d
+Arena, Survival, Skill, 2D, Difficult
 ```
 
 | Tag | Why |
 |---|---|
+| `Arena` | Literally what it is: one closed arena, waves closing in |
+| `Survival` | The whole objective — outlast escalating waves |
+| `Skill` | Timing the release and reading the field is the game |
+| `2D` | Factual, and how players filter |
+| `Difficult` | True — most runs end in death, and it sets expectations |
+
+**Category:** Action.
+
+**Not in the picker** — do not try these again: play-and-upgrade, upgrade,
+one-button, roguelike, roguelite, top-down, upgrades, magnet, waves, neon,
+bullet-catching, bullet-hell, shoot-em-up, endless.
+
+> Verification note: a `/t/<tag>` page returning 200 does **not** mean the tag
+> is selectable in the developer form — the browse URL space is wider than the
+> picker. The list above came from the form itself, which is the only authority.
+
+---|---|
 | `arena` | Literally what it is: one closed arena, waves closing in |
 | `survive` | The whole objective — outlast escalating waves |
 | `play-and-upgrade` | Level-up cards plus Flux and unlockable cores |
