@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-157_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-159_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -369,7 +369,35 @@ wave 79 and never died. Fix: the **lancer** fires a non-magnetic spike after a
 0.85s telegraphed charge. It cannot be caught, only dodged, which breaks the
 dominant "hold forever" strategy. Sustain was also capped to one heal per wave.
 
+### Half hearts
+
+Damage comes in half hearts. The split is meant to be readable off the screen
+rather than memorised:
+
+| | Costs | Why |
+|---|---|---|
+| Contact with the swarm — drone, spinner, shooter, splitter, lancer | **½** | Light things that chip at you |
+| Contact with a brute or the Guardian | **1** | The things with weight behind them |
+| A magnetic bolt | **½** | You were supposed to catch it |
+| A lancer spike | **1** | The one attack you cannot catch and can only dodge |
+
+Everything else about a hit scales with it too — the screen flash, the shake,
+the hit-stop, and how much of the orbit you drop (half the orbit on a full
+heart, a quarter on a chip). Losing a heart should still land like losing a
+heart.
+
+Hearts sit on exact 0.5 steps, so `hp <= 0` is a safe death test with no
+epsilon, and the HUD draws a half diamond by clipping *before* the 45° rotation
+— a diagonal cut reads as a smaller diamond rather than as half of one.
+
 ### Current balance
+
+> **These numbers predate half hearts and are now optimistic.** In a controlled
+> A/B — same bot, same seeds, only the damage model differing — median survival
+> went from 52.5s to 123.5s (**+135%**) and mean from 78.1s to 137.1s (+76%),
+> with several runs hitting the cap so the real effect is larger. The curve
+> below has not been retuned to compensate; the game is meaningfully more
+> forgiving than this table says.
 
 Latest sample is 15 bot runs per core, 90 runs total, capped at 6 minutes:
 
@@ -401,7 +429,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 157 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 159 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling

@@ -453,17 +453,35 @@ function drawPops(){
 
 /* --------------------------------- HUD --------------------------------- */
 function drawHUD(){
-  // lives
+  // lives, in half hearts
   for(var i=0;i<P.maxHp;i++){
     var x = 38+i*28, y = 40;
-    var on = i<P.hp;
-    ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4);
-    if(on){
-      ctx.fillStyle = P.hp<=1 ? '#ff5f7a' : C.player;
+    var full = P.hp >= i+1;
+    var half = !full && P.hp > i;
+    var lcol = P.hp<=1 ? '#ff5f7a' : C.player;
+    ctx.save(); ctx.translate(x,y);
+    if(half){
+      /* Clipped BEFORE the rotation, so the cut runs vertically down the
+         screen rather than along the diamond's own edge - a diagonal split
+         reads as a smaller diamond rather than as half of one. */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(-12,-12,12,24); ctx.clip();
+      ctx.rotate(Math.PI/4);
+      ctx.fillStyle = lcol;
       ctx.fillRect(-7.5,-7.5,15,15);
-    } else {
-      ctx.strokeStyle='rgba(234,242,255,0.26)'; ctx.lineWidth=2;
+      ctx.restore();
+      ctx.rotate(Math.PI/4);
+      ctx.strokeStyle = hexA(lcol, 0.55); ctx.lineWidth = 2;
       ctx.strokeRect(-7.5,-7.5,15,15);
+    } else {
+      ctx.rotate(Math.PI/4);
+      if(full){
+        ctx.fillStyle = lcol;
+        ctx.fillRect(-7.5,-7.5,15,15);
+      } else {
+        ctx.strokeStyle='rgba(234,242,255,0.26)'; ctx.lineWidth=2;
+        ctx.strokeRect(-7.5,-7.5,15,15);
+      }
     }
     ctx.restore();
   }

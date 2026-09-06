@@ -118,27 +118,43 @@ function killEnemy(e){
   // fully-upgraded player literally unkillable in long runs.
   if(P.siphon>0 && !G.healedThisWave && P.killsSinceHeal >= 30/P.siphon){
     P.killsSinceHeal = 0; G.healedThisWave = true;
-    if(P.hp < P.maxHp){ P.hp++; A.sHeal(); popText(P.x,P.y-34,'+1 LIFE','#78ffa8',22); ring(P.x,P.y,90,'rgba(120,255,168,0.6)',0.5,3); }
+    if(P.hp < P.maxHp){
+      // Clamped: healing a whole heart off a half would overshoot the maximum.
+      P.hp = Math.min(P.maxHp, P.hp + 1);
+      A.sHeal(); popText(P.x,P.y-34,'+1 LIFE','#78ffa8',22); ring(P.x,P.y,90,'rgba(120,255,168,0.6)',0.5,3);
+    }
   }
   checkLevel();
 }
 
-function hurtPlayer(){
+/* Damage comes in half hearts. The split is meant to be readable off the
+   screen rather than memorised: the things that CHIP at you take half - the
+   light swarm running into you, and the magnetic bullets you were supposed to
+   be catching - and the things you are meant to actually fear take a whole
+   one: a brute or the Guardian landing on you, and the lancer's spike, which
+   is the single attack in the game you cannot catch and can only dodge.
+
+   Halves are exact in binary, so hp stays on clean 0.5 steps and `<= 0` is a
+   safe death test - no epsilon needed. */
+function hurtPlayer(dmg){
   if(P.inv>0 || G.mode!=='play' && G.mode!=='intro') return;
-  P.hp--;
+  dmg = dmg || 1;
+  P.hp -= dmg;
   P.inv = 1.35;
   G.combo = 0;
-  G.dmgFlash = 1;
+  /* Every bit of feedback scales with the hit, so a chip does not land like a
+     killing blow. Losing a heart should still feel like losing a heart. */
+  G.dmgFlash = dmg;
   A.sHurt();
-  shakeIt(20);
-  G.hitStop = Math.max(G.hitStop, 0.11);
-  spark(P.x,P.y,22,'#ff5566',90,380,0.25,0.6,3.5);
-  ring(P.x,P.y,140,'rgba(255,80,100,0.7)',0.5,4);
-  // drop half the orbit on hit
-  var drop = Math.floor(orbit.length/2);
+  shakeIt(10 + 10*dmg);
+  G.hitStop = Math.max(G.hitStop, 0.06 + 0.05*dmg);
+  spark(P.x, P.y, Math.round(10 + 12*dmg), '#ff5566', 90, 380, 0.25, 0.6, 3.5);
+  ring(P.x, P.y, 90 + 50*dmg, 'rgba(255,80,100,0.7)', 0.5, 4);
+  // Orbit lost scales too: a graze should not cost a full release.
+  var drop = Math.floor(orbit.length * 0.5 * dmg);
   for(var i=0;i<drop;i++) orbit.pop();
   redistribute();
-  if(P.hp<=0) die();
+  if(P.hp <= 0) die();
 }
 
 var REVIVE_SECONDS = 8;
