@@ -295,6 +295,9 @@ requirements CrazyGames documents.
 - [x] Banners on menus only (death screen, core menu), never during play
 - [x] Banner clear of the game's buttons; click-anywhere disabled while one is on screen
 - [x] Playable with an adblocker — the revive button is hidden rather than dead
+- [x] Basic launch — `adsDisabledBasicLaunch` / `bannersDisabledBasicLaunch` switch ads
+  and banners off for the session on the first refusal, so the revive is never offered
+  as a button that cannot work and no space is reserved for a slot that cannot fill
 - [x] Portal muting — `SDK.game.settings.muteAudio` is honoured and followed via
   `addSettingsChangeListener`, and it overrides the in-game mute button rather than
   being toggleable by the player

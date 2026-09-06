@@ -1031,6 +1031,14 @@ var BANNER = {
   /* No fill: collapse the container rather than leave an empty rectangle.
      The reserved space stays, so the panel does not jump. */
   fail:function(code){
+    // Same as ads: in basic launch banners are off, so stop asking entirely
+    // rather than reserving space for a slot that can never fill.
+    if(code === 'bannersDisabledBasicLaunch'){
+      try{ window.CG.bannersOk = false; }catch(e){}
+      this.shown = false; this.reserved = false; this.filled = false;
+      if(this.wrap) this.wrap.className = '';
+      return;
+    }
     if(code !== 'bannerCooldown') this.fails++;
     this.shown = false;
     this.filled = false;
@@ -1386,7 +1394,14 @@ window.CG = {
           runGuard = setTimeout(function(){ settle(false,'noEnd'); }, 120000);
         },
         adFinished:function(){ settle(true); },
-        adError:function(e){ settle(false, e && e.code); }
+        adError:function(e){
+          var code = e && e.code;
+          /* Basic launch disables ads outright. Without this the rewarded
+             revive would be offered on every death and fail every time - a
+             button with no functional effect, which is a rejection cause. */
+          if(code === 'adsDisabledBasicLaunch') self.adsOk = false;
+          settle(false, code);
+        }
       });
     }catch(e){ settle(false,'threw'); }
   },
