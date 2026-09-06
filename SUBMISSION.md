@@ -28,7 +28,7 @@ to bundle anyway.
 | Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, H.264, no audio |
 | Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, gameplay over a title lockup |
 
-Build size is ~130 KB in one file — far inside the 50 MB initial-download cap
+Build size is ~131 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
 eligibility.
 

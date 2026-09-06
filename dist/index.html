@@ -2892,20 +2892,39 @@ function needsRotate(){
    unit is capped so a tablet does not scale the lockup off the bottom. */
 function rotateLayout(){
   var u = Math.min(cssW, cssH) / 100;
-  var uc = Math.min(u, 5);
+  /* The unit comes off the narrow edge, but the lockup is laid out DOWN the
+     screen - so a short viewport has to shrink it or the dismiss button walks
+     off the bottom. Everything below centre is 52*uc plus the button plus a
+     margin, and that has to fit in the lower half. A 360x400 frame put the
+     button 27px past the bottom edge before this. Real phones are nowhere near
+     the limit, so none of them change. */
+  var uc = Math.max(2, Math.min(u, 5, (cssH/2 - 52) / 52));
   var cy = cssH/2 - 14*uc;
-  var bh = Math.max(40, 11*uc);
+  /* 44 is the floor every touch guideline agrees on, and 11*uc only clears it
+     above a ~400px narrow edge - so on a 375-wide phone this button was 41px
+     and the one control on the screen was the one under the minimum. */
+  var bh = Math.max(44, 11*uc);
   var bw = Math.min(cssW*0.62, 58*uc);
+  /* Last resort below the size the shrink can rescue: crowded text is ugly,
+     but a dismiss button under the fold is a trap - the prompt swallows every
+     tap, so an unreachable button means an unplayable game. Keep it on screen. */
+  var by = Math.min(cy + 66*uc, cssH - bh - 8);
   return { u:u, uc:uc, cy:cy,
            titleY: cy + 46*uc,
            subY:   cy + 57*uc,
-           btn: { x:(cssW-bw)/2, y:cy + 66*uc, w:bw, h:bh } };
+           btn: { x:(cssW-bw)/2, y:by, w:bw, h:bh } };
 }
 function rotateBtn(){ return rotateLayout().btn; }
 
 function drawRotate(){
   var L = rotateLayout(), uc = L.uc, cx = cssW/2, cy = L.cy;
-  ctx.fillStyle = 'rgba(3,5,14,0.94)';
+  /* Over the arena the backdrop stays a little translucent, so the run reads
+     as still there behind the prompt. Over a menu that hint is just noise: a
+     card grid showing through at 6% is a smudge rather than depth, and the
+     menu is not a thing you are in the middle of. */
+  var overMenu = (G.mode === 'shop'  || G.mode === 'cores' || G.mode === 'over' ||
+                  G.mode === 'levelup' || G.mode === 'revive');
+  ctx.fillStyle = overMenu ? '#03050e' : 'rgba(3,5,14,0.94)';
   ctx.fillRect(0, 0, cssW, cssH);
 
   // phone turning from portrait to landscape, on a loop

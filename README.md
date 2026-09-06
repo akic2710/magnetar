@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-130_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-131_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -326,7 +326,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 130 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 131 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling
@@ -354,7 +354,7 @@ requirements CrazyGames documents.
 
 Not documented requirements, but things QA and players notice.
 
-- [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad
+- [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad. The dismiss button clears the 44px touch minimum on every phone tested, the lockup shrinks rather than pushing that button off a short viewport, and the backdrop is opaque over menus so a card grid never ghosts through it
 - [x] **No real-money purchases** — the shop spends Flux, which is only ever earned by playing. Answer *no* to in-game purchases on the submission form; that feature is invite-only and is not wired up
 - [x] **Nothing is pay-to-win** — proven by bit-identical seeded run fingerprints with everything owned versus nothing owned, not by inspection
 
