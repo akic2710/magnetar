@@ -25,8 +25,15 @@ to bundle anyway.
 | Landscape cover | `covers/landscape_1920x1080.png` | 1920×1080 |
 | Portrait cover | `covers/portrait_800x1200.png` | 800×1200 |
 | Square cover | `covers/square_800x800.png` | 800×800 |
-| Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, H.264, no audio |
+| Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, H.264, no audio — **stale, see below** |
 | Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, gameplay over a title lockup |
+
+> **The two preview videos predate 13 commits of visible change** — they still
+> show a health bar on every tough enemy, the old brighter scrap field, the
+> duplicated WAVE label, whole hearts rather than halves, and no shop. The
+> covers are stylised enough to still be accurate. Regenerate the videos before
+> uploading, or upload without them and add them later; CrazyGames lets you
+> update media after submission.
 
 Build size is ~168 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
@@ -71,6 +78,9 @@ opens: a heavy shell that grinds through the swarm, a hungry ring that holds
 eleven objects at once, a glass cannon that punches through everything, or a
 drifter that never has to slow down.
 
+Flux also buys a shop of motion wakes and arena palettes, plus amplifiers that
+bank more of it. None of it makes a run easier — the looks are only looks.
+
 Runs last two to five minutes. Dying is part of it.
 ```
 
@@ -81,7 +91,7 @@ Mouse — move to steer, hold the button to pull, release to blast
 Touch — drag to steer, lift your finger to blast (play in landscape)
 Keyboard — arrows, WASD or ZQSD to move, Space or Shift to pull
 
-M mute · P pause · 1 / 2 / 3 pick an upgrade · C cores · Enter restart
+M mute · P pause · 1 / 2 / 3 pick an upgrade · C cores · S shop · Enter restart
 ```
 
 **Category** (CrazyGames' real list: action, adventure, arcade, board, card,
