@@ -8,3 +8,6 @@ dist/.check.js
 
 # Cover contact sheet, regenerated on demand.
 covers/_preview.png
+
+# Frame scratch for the preview videos, rebuilt on demand.
+.vidwork/

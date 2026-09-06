@@ -25,6 +25,8 @@ to bundle anyway.
 | Landscape cover | `covers/landscape_1920x1080.png` | 1920×1080 |
 | Portrait cover | `covers/portrait_800x1200.png` | 800×1200 |
 | Square cover | `covers/square_800x800.png` | 800×800 |
+| Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, H.264, no audio |
+| Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, gameplay over a title lockup |
 
 Build size is ~111 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
