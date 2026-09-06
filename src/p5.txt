@@ -505,7 +505,7 @@ function drawHUD(){
   text('LV '+G.level, 38, VH-26, 12, C.dim, 'left', 700, 0.75, 2);
   text(coreById(P.core).name, 38+78, VH-26, 11, C.player, 'left', 700, 0.5, 2.5);
 
-  drawBtn(BTN_MUTE, A.muted?'muted':'sound');
+  drawBtn(BTN_MUTE, (A.muted||A.forced)?'muted':'sound');
   drawBtn(BTN_PAUSE, G.paused?'play':'pause');
 }
 
@@ -861,7 +861,7 @@ function drawCores(){
   roundRect(LB.x,LB.y,LB.w,LB.h,14); ctx.stroke();
   text('LAUNCH', VW/2, LB.y+LB.h/2, 19, C.text, 'center', 900, 1, 4);
 
-  drawBtn(BTN_MUTE, A.muted?'muted':'sound');
+  drawBtn(BTN_MUTE, (A.muted||A.forced)?'muted':'sound');
   ctx.globalAlpha = 1;
 }
 
@@ -1326,6 +1326,17 @@ window.CG = {
         SDK.user.addAuthListener(function(){
           refreshCloudSave();
           applyCloudSave();
+        });
+      }
+    }catch(e){}
+
+    /* The portal can mute us at any time. Read it once, then follow changes -
+       the player's own mute button deliberately cannot lift this. */
+    try{
+      if(SDK.game && SDK.game.settings) A.setForcedMute(!!SDK.game.settings.muteAudio);
+      if(SDK.game && SDK.game.addSettingsChangeListener){
+        SDK.game.addSettingsChangeListener(function(st){
+          A.setForcedMute(!!(st && st.muteAudio));
         });
       }
     }catch(e){}

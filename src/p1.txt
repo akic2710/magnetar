@@ -173,7 +173,7 @@ var A = {
     this.ready = true;
   },
   resume:function(){ if(this.ctx && this.ctx.state==='suspended'){ try{ this.ctx.resume(); }catch(e){} } },
-  ducked:false,
+  ducked:false, forced:false,
   setMute:function(m){
     this.muted = m; store('mgn.mute', m?'1':'0');
     this.applyGain();
@@ -182,12 +182,17 @@ var A = {
      Ducking is separate from mute so restoring audio afterwards cannot
      clobber what the player actually chose. */
   duck:function(on){ this.ducked = !!on; this.applyGain(); },
+  /* The portal can mute the game itself via SDK.game.settings.muteAudio. The
+     docs require that to take priority over in-game audio settings, so it is a
+     third independent flag: the player's own mute button cannot lift it. */
+  setForcedMute:function(on){ this.forced = !!on; this.applyGain(); },
+  silent:function(){ return this.muted || this.ducked || this.forced; },
   applyGain:function(){
     if(!this.master || !this.ctx) return;
-    this.master.gain.setTargetAtTime((this.muted||this.ducked)?0:0.5, this.ctx.currentTime, 0.03);
+    this.master.gain.setTargetAtTime(this.silent()?0:0.5, this.ctx.currentTime, 0.03);
   },
   tone:function(f,dur,type,vol,f2,delay,bus){
-    if(!this.ctx||this.muted) return;
+    if(!this.ctx||this.muted||this.forced) return;
     var c=this.ctx, t=c.currentTime+(delay||0);
     var o=c.createOscillator(); o.type=type||'square';
     o.frequency.setValueAtTime(f,t);
@@ -200,7 +205,7 @@ var A = {
     try{ o.start(t); o.stop(t+dur+0.03); }catch(e){}
   },
   hit:function(dur,vol,freq,q,delay){
-    if(!this.ctx||this.muted) return;
+    if(!this.ctx||this.muted||this.forced) return;
     var c=this.ctx, t=c.currentTime+(delay||0);
     var s=c.createBufferSource(); s.buffer=this.noise; s.loop=true;
     var f=c.createBiquadFilter(); f.type='bandpass'; f.frequency.setValueAtTime(freq,t); f.Q.value=q||1.2;
@@ -212,7 +217,7 @@ var A = {
   setHum:function(v,pitch){
     if(!this.ctx||!this.humGain) return;
     var t=this.ctx.currentTime;
-    this.humGain.gain.setTargetAtTime(this.muted?0:v*0.15, t, 0.06);
+    this.humGain.gain.setTargetAtTime(this.silent()?0:v*0.15, t, 0.06);
     this.humFilt.frequency.setTargetAtTime(360+pitch*900, t, 0.08);
     this.hum.frequency.setTargetAtTime(58+pitch*26, t, 0.10);
   },
@@ -248,7 +253,7 @@ var A = {
 
   ROOTS:[0,0,-4,3],
   tick:function(){
-    if(!this.ctx || this.muted || this.ducked){ this.musT = 0; return; }
+    if(!this.ctx || this.silent()){ this.musT = 0; return; }
     var spb=60/126, six=spb/4, c=this.ctx;
     if(this.musT===0) this.musT = c.currentTime+0.12;
     var guard=0;
