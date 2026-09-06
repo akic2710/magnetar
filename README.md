@@ -2,7 +2,7 @@
 
 [![CrazyGames requirements](https://img.shields.io/badge/CrazyGames_requirements-12%2F12_met-7cf3ff?style=flat-square)](#crazygames-submission-checklist)
 [![SDK](https://img.shields.io/badge/CrazyGames_SDK-v3_integrated-c88bff?style=flat-square)](#sdk-integration)
-[![Build](https://img.shields.io/badge/build-148_KB_single_file-6effc0?style=flat-square)](#magnetar)
+[![Build](https://img.shields.io/badge/build-157_KB_single_file-6effc0?style=flat-square)](#magnetar)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-b9c7de?style=flat-square)](#magnetar)
 [![Network requests](https://img.shields.io/badge/network_requests-0-b9c7de?style=flat-square)](#magnetar)
 [![License](https://img.shields.io/badge/license-PolyForm_Strict_1.0.0-b9c7de?style=flat-square)](LICENSE)
@@ -61,9 +61,9 @@ which is a thing you read rather than a thing you play — and inside the
 letterbox both menus were unreadable: item names at **4.7px**, prices at 3.5px,
 and a LAUNCH button 15px tall.
 
-| Shop | Cores |
-|---|---|
-| <img src="docs/screenshot-shop-portrait.webp" width="240" alt="The shop on a 375x812 phone in portrait: a SHOP header with the Flux balance, a WAKES / ARENAS / BOOSTS tab bar, and four full-width cards - Standard, Ion Wake equipped, Sparkfall at 450 Flux and Echo at 700 Flux - above LAUNCH, CORES and mute buttons"> | <img src="docs/screenshot-cores-portrait.webp" width="240" alt="The core menu on the same phone: a CORES header with the Flux balance and a synced-to-your-account line, then six full-width cards - Prospector, Warden equipped in green, Maw affordable at 450 Flux, and Needle, Pulsar and Drifter dimmed - above LAUNCH, SHOP and mute buttons"> |
+| Shop | Cores | Game over |
+|---|---|---|
+| <img src="docs/screenshot-shop-portrait.webp" width="200" alt="The shop on a 375x812 phone in portrait: a SHOP header with the Flux balance, a WAKES / ARENAS / BOOSTS tab bar, and four full-width cards - Standard, Ion Wake equipped, Sparkfall at 450 Flux and Echo at 700 Flux - above LAUNCH, CORES and mute buttons"> | <img src="docs/screenshot-cores-portrait.webp" width="200" alt="The core menu on the same phone: a CORES header with the Flux balance and a synced-to-your-account line, then six full-width cards - Prospector, Warden equipped in green, Maw affordable at 450 Flux, and Needle, Pulsar and Drifter dimmed - above LAUNCH, SHOP and mute buttons"> | <img src="docs/screenshot-over-portrait.webp" width="200" alt="The death screen on the same phone: CORE LOST above the rank, a large 1460 score marked NEW BEST SCORE, a row of wave, best combo and best stats, the Flux payout with its amplifier note, then a full-width PLAY AGAIN above CORES, SHOP and mute"> |
 
 So in portrait both screens leave the 1280×720 space altogether and lay
 themselves out in **CSS pixels across the whole screen**, the way the rotate
@@ -87,6 +87,23 @@ stats, not three. So each card asks how many lines it can afford and renders
 the longest run of stats that actually fits, measured rather than guessed,
 falling back to the lives/slots line which is always the trade that matters.
 The flavour tag is the one thing dropped in portrait.
+
+**The death screen** is not a list, so it does not use that frame: it is a
+column of numbers with the actions underneath. The block is measured from its
+own type sizes and then centred, rather than pinned to fractions of the screen,
+so a 568-tall phone and a 932-tall one both look composed instead of one of
+them looking stretched. Below about 400px tall the display type and the gaps
+shrink together until the column clears the buttons — the small labels hold
+their floor, and the score never goes under 32px.
+
+It is also the one portrait screen that **keeps its banner**. The death screen
+is the placement that actually earns, so rather than drop it the layout
+reserves a real 74px strip along the bottom and lifts the buttons above it,
+with 8px of dead space and the ADVERTISEMENT label providing the separation the
+ad requirements ask for. The strip is only taken when a banner could fill it —
+never under 340px wide, where nothing fits, and never on a screen so short that
+reserving it would push the score under the buttons. On those, the banner gives
+way, not the score.
 
 | | Letterboxed | Portrait layout |
 |---|---|---|
@@ -384,7 +401,7 @@ requirements CrazyGames documents.
 - [x] **No reserved keys** — Escape and Ctrl+W unbound
 - [x] **International keyboards** — arrows + WASD + ZQSD; the blast is radial, so nothing needs rebinding
 - [x] **Touch parity** — drag to move, lift to blast; identical verb on every device
-- [x] **Download size** — 148 KB, one file, well under the 50 MB cap
+- [x] **Download size** — 157 KB, one file, well under the 50 MB cap
 - [x] **Zero external requests** — procedural art, WebAudio-synthesised music and SFX, no CDN, no assets
 - [x] **Audio behaviour** — starts only after a user gesture, mute persists, pauses on blur/hidden, ducks for ads
 - [x] **PEGI 12** — abstract neon shapes, no gore, no sexual content, no real-money gambling
@@ -413,7 +430,8 @@ requirements CrazyGames documents.
 Not documented requirements, but things QA and players notice.
 
 - [x] **Mobile orientation** — portrait on a touch device prompts for landscape instead of silently letterboxing into a strip a third of the screen tall; dismissable, and never shown on desktop or over an ad. The dismiss button clears the 44px touch minimum on every phone tested, the lockup shrinks rather than pushing that button off a short viewport, and the backdrop is opaque over menus so a card grid never ghosts through it
-- [x] **Portrait menus** — the shop and the core menu both have real portrait layouts in CSS pixels rather than letterboxed ones, so they are readable and tappable without rotating; the rotate prompt stands down while you are in either
+- [x] **Portrait menus** — the shop, the core menu and the death screen all have real portrait layouts in CSS pixels rather than letterboxed ones, so they are readable and tappable without rotating; the rotate prompt stands down while you are in any of them
+- [x] **Portrait banner** — the death screen keeps its banner in portrait in a reserved strip, clear of every button by 8px and the ADVERTISEMENT label; it is only reserved where one could actually fill
 - [x] **No real-money purchases** — the shop spends Flux, which is only ever earned by playing. Answer *no* to in-game purchases on the submission form; that feature is invite-only and is not wired up
 - [x] **Nothing is pay-to-win** — proven by bit-identical seeded run fingerprints with everything owned versus nothing owned, not by inspection
 
