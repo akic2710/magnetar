@@ -382,9 +382,17 @@ rather than memorised:
 | A lancer spike | **1** | The one attack you cannot catch and can only dodge |
 
 Everything else about a hit scales with it too — the screen flash, the shake,
-the hit-stop, and how much of the orbit you drop (half the orbit on a full
-heart, a quarter on a chip). Losing a heart should still land like losing a
-heart.
+the hit-stop, how much of the orbit you drop (half on a full heart, a quarter
+on a chip), and **the invulnerability window**.
+
+That last one is what keeps half hearts from halving the difficulty. What set
+the original balance was never the size of a hit but the worst-case *rate*: one
+heart per 1.35s, or 0.74 hearts a second. Half a heart per 0.675s is exactly
+the same ceiling — so a chip buys a shorter breather, a real hit still buys the
+full one, and the pressure the waves were tuned against is unchanged. Measured
+by hammering the player every frame for two simulated minutes, both models let
+through **0.742 hearts/sec**; with flat 1.35s i-frames it was 0.371, precisely
+half.
 
 Hearts sit on exact 0.5 steps, so `hp <= 0` is a safe death test with no
 epsilon, and the HUD draws a half diamond by clipping *before* the 45° rotation
@@ -392,12 +400,13 @@ epsilon, and the HUD draws a half diamond by clipping *before* the 45° rotation
 
 ### Current balance
 
-> **These numbers predate half hearts and are now optimistic.** In a controlled
-> A/B — same bot, same seeds, only the damage model differing — median survival
-> went from 52.5s to 123.5s (**+135%**) and mean from 78.1s to 137.1s (+76%),
-> with several runs hitting the cap so the real effect is larger. The curve
-> below has not been retuned to compensate; the game is meaningfully more
-> forgiving than this table says.
+> **These numbers survived the move to half hearts.** Half-heart damage on its
+> own made the game 29% more forgiving (mean bot survival 85.4s → 109.9s in a
+> controlled A/B, same bot and seeds, only the damage model differing). Scaling
+> the invulnerability window with the hit put it back: **87.3s, within 2.2% of
+> the pre-change 85.4s**, with median wave back on 5. Mean wave lands 9% under,
+> so if anything it is a shade harder than before, well inside the bimodal
+> noise described below.
 
 Latest sample is 15 bot runs per core, 90 runs total, capped at 6 minutes:
 

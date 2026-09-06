@@ -1051,7 +1051,13 @@ function hurtPlayer(dmg){
   if(P.inv>0 || G.mode!=='play' && G.mode!=='intro') return;
   dmg = dmg || 1;
   P.hp -= dmg;
-  P.inv = 1.35;
+  /* Invulnerability scales with the hit, and that is what keeps half hearts
+     from halving the difficulty. What set the old balance was not the size of
+     a hit but the WORST CASE RATE: one heart per 1.35s, or 0.74 hearts a
+     second. Half a heart per 0.675s is exactly the same ceiling - so a chip
+     buys a shorter breather, a real hit still buys the full one, and the
+     pressure the waves were tuned against is unchanged. */
+  P.inv = 1.35 * dmg;
   G.combo = 0;
   /* Every bit of feedback scales with the hit, so a chip does not land like a
      killing blow. Losing a heart should still feel like losing a heart. */
