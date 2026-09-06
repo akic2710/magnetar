@@ -118,7 +118,6 @@ Arena, Survival, Skill, 2D, Difficult
 | `2D` | Factual, and how players filter |
 | `Difficult` | True — most runs end in death, and it sets expectations |
 
-**Category:** Action.
 
 **Not in the picker** — do not try these again: play-and-upgrade, upgrade,
 one-button, roguelike, roguelite, top-down, upgrades, magnet, waves, neon,
@@ -127,25 +126,6 @@ bullet-catching, bullet-hell, shoot-em-up, endless.
 > Verification note: a `/t/<tag>` page returning 200 does **not** mean the tag
 > is selectable in the developer form — the browse URL space is wider than the
 > picker. The list above came from the form itself, which is the only authority.
-
----|---|
-| `arena` | Literally what it is: one closed arena, waves closing in |
-| `survive` | The whole objective — outlast escalating waves |
-| `play-and-upgrade` | Level-up cards plus Flux and unlockable cores |
-| `skill` | Timing the release and reading the field is the game |
-| `2d` | Factual, and how players filter |
-
-Alternates if any of those are missing from the picker: `avoid` (dodging
-lancer spikes), `5-minute-fun` (runs are 2–5 minutes), `difficult` (most runs
-end in death), `casual`, `adrenaline`, `destroy`.
-
-**Do not use** — these were guessed at earlier and are wrong: roguelite,
-upgrades, magnet, waves, neon, bullet-catching, bullet-hell,
-shoot-em-up, endless, one-button, roguelike, top-down.
-
-> Verification note: a `/t/<tag>` page returning 200 does **not** mean the tag
-> is selectable in the developer form. The form's dropdown is the only
-> authority. Pick from it; do not infer from site URLs.
 
 ---
 
