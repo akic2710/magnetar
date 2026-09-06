@@ -84,20 +84,30 @@ Keyboard — arrows, WASD or ZQSD to move, Space or Shift to pull
 M mute · P pause · 1 / 2 / 3 pick an upgrade · C cores · Enter restart
 ```
 
-**Genre / category**
+**Category** (CrazyGames' real list: action, adventure, arcade, board, card,
+casual, clicker, driving, io, puzzle, shooting, sim, sports, strategy, trivia,
+word)
 
-Primary: **Action**. Also fits Arcade and Shooting.
+Primary: **Action**. Arcade is the reasonable second choice.
 
 **Input methods**: mouse, keyboard, touch
 **Players**: singleplayer
 **Orientation**: landscape
 
-**Tags**
+**Tags** — max 5, and only tags that exist on CrazyGames. Verified live: every
+one below returns a real /t/ page, and each is already carried by comparable
+games (arena on holey-io, one-button on space-waves, survive on crazy-chameleon,
+top-down on evowars.io).
 
 ```
-arena, roguelite, one-button, magnet, survival, upgrades, waves, neon,
-bullet-catching, arcade, singleplayer
+arena, survive, one-button, roguelike, top-down
 ```
+
+Also valid if you want to swap: `skill`, `2d`, `avoid`, `upgrade`,
+`play-and-upgrade`, `difficult`, `5-minute-fun`, `adrenaline`, `casual`.
+
+Do **not** use: roguelite, upgrades, magnet, waves, neon, bullet-hell,
+shoot-em-up, endless — none of these exist as CrazyGames tags.
 
 ---
 
