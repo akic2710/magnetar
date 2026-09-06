@@ -28,12 +28,24 @@ to bundle anyway.
 | Landscape video | `media/preview-landscape.mp4` | 1280×720, 10s, 30fps, H.264, no audio |
 | Portrait video | `media/preview-portrait.mp4` | 800×1200, 10s, 30fps, gameplay framed in a title card |
 
-> Both preview videos were recaptured against the current build on 06/09/2026
-> and match what a player now loads. They are deterministic captures rather
-> than screen recordings — the frame loop is driven at a synthetic 30 Hz clock
-> with the canvas pinned to the output size — so re-running the capture gives
-> the same ten seconds again. The landscape clip opens on wave 7 at full
-> health and ends on wave 8 having taken one hit.
+> **The videos in this repo are current; the ones on CrazyGames are not.**
+> Both were recaptured against the build on 06/09/2026 and match what a player
+> now loads — deterministic captures rather than screen recordings, the frame
+> loop driven at a synthetic clock with the canvas pinned to the output size.
+> The landscape clip opens on wave 7 at full health and ends on wave 8 having
+> taken one hit.
+>
+> They could not be uploaded. The portal uploads a video and then calls
+> `videoThumbnailCreate` to resize it server-side; the Save button is gated on
+> that returning a thumbnail, and it fails on these files, leaving the filename
+> showing and Save permanently greyed. Every property was matched to the two
+> videos that did convert on 06/09 at 01:32 — codec, profile, level, dimensions,
+> `yuv420p`, progressive, no audio, frame rate — without success. Diagnosing
+> further needs the server's error text, from the red message under the video
+> slot or a `failed to resize video` line in the browser console.
+>
+> Art version `9bbcd895` (06/09 01:32) is what reviewers see, and it carries the
+> superseded videos. Media can be replaced after review.
 
 Build size is ~168 KB in one file — far inside the 50 MB initial-download cap
 and the 1,500 file limit, and inside the 20 MB threshold for mobile homepage
